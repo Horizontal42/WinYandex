@@ -147,7 +147,7 @@
                                         ToolTipService.ToolTip="{x:Bind ViewModel.WaveFilterTooltip, Mode=OneWay}">
                                     <FontIcon Glyph="&#xE71C;" FontSize="15" />
                                     <Button.Flyout>
-                                        <MenuFlyout Placement="BottomEdgeAlignedRight">
+                                        <MenuFlyout Placement="BottomEdgeAlignedRight" ShouldConstrainToRootBounds="True">
                                             <MenuFlyoutSubItem Text="{x:Bind ViewModel.WaveFilterCharacterTitle, Mode=OneWay}">
                                                 <MenuFlyoutItem Text="Любое (Моя волна)" Click="WaveFilterOption_Click" Tag="onyourwave" />
                                                 <MenuFlyoutItem Text="Любимое (знакомое)" Click="WaveFilterOption_Click" Tag="favorite" />
@@ -279,7 +279,7 @@
                                             Background="Transparent"
                                             BorderBrush="Transparent">
                                         <Button.ContextFlyout>
-                                            <MenuFlyout>
+                                            <MenuFlyout ShouldConstrainToRootBounds="True">
                                                 <MenuFlyoutItem Text="{x:Bind IsLiked, Mode=OneWay, Converter={StaticResource BoolToLikeMenuTextConverter}}"
                                                                 Click="TogglePlaylistLikeContext_Click"
                                                                 Tag="{x:Bind}">
@@ -387,7 +387,7 @@
                                             Background="Transparent"
                                             BorderBrush="Transparent">
                                         <Button.ContextFlyout>
-                                            <MenuFlyout>
+                                            <MenuFlyout ShouldConstrainToRootBounds="True">
                                                 <MenuFlyoutItem Text="{x:Bind IsLiked, Mode=OneWay, Converter={StaticResource BoolToLikeMenuTextConverter}}"
                                                                 Click="ToggleAlbumLikeContext_Click"
                                                                 Tag="{x:Bind}">
@@ -493,7 +493,7 @@
                                             Background="Transparent"
                                             BorderBrush="Transparent">
                                         <Button.ContextFlyout>
-                                            <MenuFlyout>
+                                            <MenuFlyout ShouldConstrainToRootBounds="True">
                                                 <MenuFlyoutItem Text="{x:Bind IsLiked, Mode=OneWay, Converter={StaticResource BoolToLikeMenuTextConverter}}"
                                                                 Click="TogglePlaylistLikeContext_Click"
                                                                 Tag="{x:Bind}">

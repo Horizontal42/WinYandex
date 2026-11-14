@@ -59,7 +59,7 @@ public static class ArtistNavigationHelper
         {
             if (anchor != null)
             {
-                var flyout = new MenuFlyout();
+                var flyout = new MenuFlyout { ShouldConstrainToRootBounds = true };
                 foreach (var artist in validArtists)
                 {
                     var item = new MenuFlyoutItem

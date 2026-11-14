@@ -159,7 +159,7 @@
                                         Background="Transparent"
                                         BorderBrush="Transparent">
                                     <Button.ContextFlyout>
-                                        <MenuFlyout>
+                                        <MenuFlyout ShouldConstrainToRootBounds="True">
                                             <MenuFlyoutItem Text="{x:Bind IsLiked, Mode=OneWay, Converter={StaticResource BoolToLikeMenuTextConverter}}"
                                                             Click="TogglePlaylistLikeContext_Click"
                                                             Tag="{x:Bind}">
@@ -340,7 +340,7 @@
                                         Background="Transparent"
                                         BorderBrush="Transparent">
                                     <Button.ContextFlyout>
-                                        <MenuFlyout>
+                                        <MenuFlyout ShouldConstrainToRootBounds="True">
                                             <MenuFlyoutItem Text="{x:Bind LikeActionText, Mode=OneWay}"
                                                             Click="ToggleAlbumLikeContext_Click"
                                                             Tag="{x:Bind}">

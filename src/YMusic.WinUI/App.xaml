@@ -260,6 +260,17 @@
             <Style TargetType="ToggleButton">
                 <Setter Property="helpers:CursorHelper.UseHandCursor" Value="True" />
             </Style>
+
+            <Style TargetType="MenuFlyoutPresenter">
+                <Setter Property="MaxHeight" Value="420" />
+                <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+                <Setter Property="ScrollViewer.VerticalScrollMode" Value="Auto" />
+            </Style>
+
+            <Style TargetType="FlyoutPresenter">
+                <Setter Property="ScrollViewer.VerticalScrollBarVisibility" Value="Auto" />
+                <Setter Property="ScrollViewer.VerticalScrollMode" Value="Auto" />
+            </Style>
         </ResourceDictionary>
     </Application.Resources>
 </Application>

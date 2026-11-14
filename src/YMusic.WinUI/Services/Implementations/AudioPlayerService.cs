@@ -249,7 +249,46 @@ public sealed class AudioPlayerService : IAudioPlayerService
         {
             AudioCategory = MediaPlayerAudioCategory.Media
         };
-        _mediaPlayer.CommandManager.IsEnabled = false;
+        _mediaPlayer.CommandManager.IsEnabled = !_settingsService.GlobalHotkeysEnabled;
+        _settingsService.SettingChanged += OnSettingsChanged;
+
+        _mediaPlayer.CommandManager.PlayReceived += (cmd, args) =>
+        {
+            var deferral = args.GetDeferral();
+            args.Handled = true;
+            LogDebug("CommandManager.PlayReceived");
+            Play();
+            deferral.Complete();
+        };
+        _mediaPlayer.CommandManager.PauseReceived += (cmd, args) =>
+        {
+            var deferral = args.GetDeferral();
+            args.Handled = true;
+            LogDebug("CommandManager.PauseReceived");
+            Pause();
+            deferral.Complete();
+        };
+        _mediaPlayer.CommandManager.NextReceived += (cmd, args) =>
+        {
+            var deferral = args.GetDeferral();
+            args.Handled = true;
+            LogDebug("CommandManager.NextReceived");
+            _ = NextAsync();
+            deferral.Complete();
+        };
+        _mediaPlayer.CommandManager.PreviousReceived += (cmd, args) =>
+        {
+            var deferral = args.GetDeferral();
+            args.Handled = true;
+            LogDebug("CommandManager.PreviousReceived");
+            _ = PreviousAsync();
+            deferral.Complete();
+        };
+
+        _mediaPlayer.CommandManager.PlayBehavior.EnablingRule = MediaCommandEnablingRule.Always;
+        _mediaPlayer.CommandManager.PauseBehavior.EnablingRule = MediaCommandEnablingRule.Always;
+        _mediaPlayer.CommandManager.NextBehavior.EnablingRule = MediaCommandEnablingRule.Always;
+        _mediaPlayer.CommandManager.PreviousBehavior.EnablingRule = MediaCommandEnablingRule.Always;
 
         _mediaPlayer.PlaybackSession.PlaybackStateChanged += OnPlaybackStateChanged;
         _mediaPlayer.PlaybackSession.NaturalDurationChanged += OnNaturalDurationChanged;
@@ -264,7 +303,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
         _smtc.IsPauseEnabled = true;
         _smtc.IsNextEnabled = true;
         _smtc.IsPreviousEnabled = true;
-        _smtc.ButtonPressed += OnSmtcButtonPressed;
 
         _positionTimer = new System.Timers.Timer(250);
         _positionTimer.Elapsed += (_, _) =>
@@ -746,6 +784,8 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     public void TogglePlayPause()
     {
+        if (!CheckPlayPauseDebounce()) return;
+
         if (_isPlaying)
         {
             Pause();
@@ -824,6 +864,10 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     public async Task NextAsync()
     {
+        LogDebug("NextAsync entered");
+        if (!CheckNavDebounce()) return;
+        LogDebug("NextAsync passed debounce -> advancing track");
+
         CancelActiveCrossfade();
         if (_queue.Count == 0 || _playOrder.Count == 0)
         {
@@ -929,6 +973,10 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     public async Task PreviousAsync()
     {
+        LogDebug($"PreviousAsync entered. Position={Position.TotalSeconds:F2}s");
+        if (!CheckNavDebounce()) return;
+        LogDebug("PreviousAsync passed debounce");
+
         CancelActiveCrossfade();
         if (_queue.Count == 0 || _playOrder.Count == 0)
         {
@@ -1445,6 +1493,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     private async Task LoadAndPlayTrackAsync(Track track, TimeSpan? startPosition = null)
     {
+        LogDebug($"LoadAndPlayTrackAsync: '{track.FullTitle}' (Id={track.Id})");
         CancelActiveCrossfade();
         int requestId = Interlocked.Increment(ref _playRequestId);
 
@@ -1731,6 +1780,11 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     private void OnMediaEnded(MediaPlayer sender, object args)
     {
+        if (_audioGraph != null && _currentInputNode != null)
+        {
+            return;
+        }
+
         if (_repeatMode == RepeatMode.One)
         {
             Seek(TimeSpan.Zero);
@@ -1741,25 +1795,64 @@ public sealed class AudioPlayerService : IAudioPlayerService
         _ = NextAsync();
     }
 
-    private void OnSmtcButtonPressed(SystemMediaTransportControls sender, SystemMediaTransportControlsButtonPressedEventArgs args)
+    private void OnSettingsChanged(object? sender, string propName)
     {
-        switch (args.Button)
+        if (propName == nameof(ISettingsService.GlobalHotkeysEnabled))
         {
-            case SystemMediaTransportControlsButton.Play:
-                Play();
-                break;
-            case SystemMediaTransportControlsButton.Pause:
-            case SystemMediaTransportControlsButton.Stop:
-                Pause();
-                break;
-            case SystemMediaTransportControlsButton.Next:
-                _ = NextAsync();
-                break;
-            case SystemMediaTransportControlsButton.Previous:
-                _ = PreviousAsync();
-                break;
+            bool isMediaKeysEnabled = !_settingsService.GlobalHotkeysEnabled;
+            _mediaPlayer.CommandManager.IsEnabled = isMediaKeysEnabled;
+            LogDebug($"GlobalHotkeysEnabled changed to {_settingsService.GlobalHotkeysEnabled}. CommandManager.IsEnabled={isMediaKeysEnabled}");
         }
     }
+
+    public static void LogDebug(string msg)
+    {
+        try
+        {
+            string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string dir = System.IO.Path.Combine(appData, "YMusic");
+            System.IO.Directory.CreateDirectory(dir);
+            System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "audioplayer.log"), $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {msg}\r\n");
+        }
+        catch { }
+    }
+
+    private long _lastNavTicks;
+    private readonly object _navDebounceLock = new();
+    private bool CheckNavDebounce(int thresholdMs = 350)
+    {
+        lock (_navDebounceLock)
+        {
+            long now = Environment.TickCount64;
+            long diff = now - _lastNavTicks;
+            if (diff < thresholdMs)
+            {
+                LogDebug($"[Debounce] BLOCKED diff={diff}ms < threshold={thresholdMs}ms");
+                return false;
+            }
+            LogDebug($"[Debounce] PASSED diff={diff}ms >= threshold={thresholdMs}ms");
+            _lastNavTicks = now;
+            return true;
+        }
+    }
+
+    private long _lastPlayPauseTicks;
+    private readonly object _playPauseDebounceLock = new();
+    private bool CheckPlayPauseDebounce(int thresholdMs = 300)
+    {
+        lock (_playPauseDebounceLock)
+        {
+            long now = Environment.TickCount64;
+            if (now - _lastPlayPauseTicks < thresholdMs)
+            {
+                return false;
+            }
+            _lastPlayPauseTicks = now;
+            return true;
+        }
+    }
+
+
 
     private void RebuildPlayOrder()
     {
@@ -1842,7 +1935,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
         _deviceOutput?.Dispose();
         _audioGraph?.Dispose();
 
-        _smtc.ButtonPressed -= OnSmtcButtonPressed;
+        _settingsService.SettingChanged -= OnSettingsChanged;
         _mediaPlayer.PlaybackSession.PlaybackStateChanged -= OnPlaybackStateChanged;
         _mediaPlayer.PlaybackSession.NaturalDurationChanged -= OnNaturalDurationChanged;
         _mediaPlayer.MediaEnded -= OnMediaEnded;

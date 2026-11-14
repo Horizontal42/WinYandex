@@ -189,7 +189,7 @@
                     ToolTipService.ToolTip="{x:Bind ViewModel.FckOptionsTooltip, Mode=OneWay}"
                     Margin="2,0,0,0">
                 <Button.Flyout>
-                    <MenuFlyout x:Name="TrackOptionsFlyout" Opening="TrackOptionsFlyout_Opening">
+                    <MenuFlyout x:Name="TrackOptionsFlyout" ShouldConstrainToRootBounds="True" Opening="TrackOptionsFlyout_Opening">
                         <!-- Start Wave by Track -->
                         <MenuFlyoutItem Text="{x:Bind ViewModel.StartTrackWaveMenuText, Mode=OneWay}"
                                         Command="{x:Bind ViewModel.StartTrackWaveCommand}"
@@ -475,7 +475,7 @@
                            TextAlignment="Center"
                            Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
                 <Button.Flyout>
-                    <MenuFlyout Placement="Top">
+                    <MenuFlyout Placement="Top" ShouldConstrainToRootBounds="True">
                         <MenuFlyoutItem Text="AAC (High Quality, 192–256 kbps)"
                                         Command="{x:Bind ViewModel.SetAudioQualityPreferenceCommand}"
                                         CommandParameter="AacPreferred" />
@@ -505,7 +505,7 @@
                           FontSize="16"
                           Foreground="{x:Bind ViewModel.IsEqualizerEnabled, Mode=OneWay, Converter={StaticResource BoolToAccentBrushConverter}}" />
                 <Button.Flyout>
-                    <Flyout Placement="Top">
+                    <Flyout Placement="Top" ShouldConstrainToRootBounds="True">
                         <Flyout.FlyoutPresenterStyle>
                             <Style TargetType="FlyoutPresenter">
                                 <Setter Property="MinWidth" Value="540" />

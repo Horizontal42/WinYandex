@@ -291,7 +291,7 @@
                                     helpers:CursorHelper.UseHandCursor="True"
                                     ToolTipService.ToolTip="{x:Bind ViewModel.FckOptionsTooltip, Mode=OneWay}">
                                 <Button.Flyout>
-                                    <MenuFlyout x:Name="DrawerTrackOptionsFlyout" Opening="DrawerTrackOptionsFlyout_Opening">
+                                    <MenuFlyout x:Name="DrawerTrackOptionsFlyout" ShouldConstrainToRootBounds="True" Opening="DrawerTrackOptionsFlyout_Opening">
                                         <!-- Start Wave by Track -->
                                         <MenuFlyoutItem Text="{x:Bind ViewModel.StartTrackWaveMenuText, Mode=OneWay}"
                                                         Command="{x:Bind ViewModel.StartTrackWaveCommand}"
@@ -454,7 +454,7 @@
                                     <TextBlock Text="{x:Bind ViewModel.LyricsOffsetBadgeText, Mode=OneWay}" FontSize="11" FontWeight="SemiBold" Foreground="#E0FFFFFF" VerticalAlignment="Center" />
                                 </StackPanel>
                                 <Button.Flyout>
-                                    <Flyout Placement="Top">
+                                    <Flyout Placement="Top" ShouldConstrainToRootBounds="True">
                                         <StackPanel Width="290" Spacing="12" Padding="4">
                                             <StackPanel Spacing="3">
                                                 <TextBlock Text="{x:Bind ViewModel.LyricsSyncTitle, Mode=OneWay}"

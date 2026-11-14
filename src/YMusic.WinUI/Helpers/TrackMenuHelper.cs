@@ -68,7 +68,7 @@ public static class TrackMenuHelper
 
     public static MenuFlyout CreateMenuFlyout(Track track)
     {
-        var flyout = new MenuFlyout();
+        var flyout = new MenuFlyout { ShouldConstrainToRootBounds = true };
         var loc = App.Loc;
         bool isEn = loc?.CurrentLanguage == "en";
 

@@ -415,8 +415,8 @@ public sealed partial class ProfileViewModel : BaseViewModel
 
     public string GlobalHotkeysTitle => IsRussian ? "Глобальные хоткеи (Ctrl+Alt+...)" : "Global System Hotkeys (Ctrl+Alt+...)";
     public string GlobalHotkeysDesc => IsRussian
-        ? "Управление плеером из любых игр и окон: Пробел (Пауза/Плей), Вправо/Влево (Треки), L (Лайк), Вверх/Вниз (Громкость), O (HUD-оверлей)"
-        : "Control player from any game or app: Space (Play/Pause), Right/Left (Tracks), L (Like), Up/Down (Volume), O (HUD Overlay)";
+        ? "Управление через комбинации (Ctrl+Alt+...). При включении отключает стандартные мультимедиа-клавиши Windows."
+        : "Control via hotkeys (Ctrl+Alt+...). When enabled, disables standard Windows multimedia keys.";
 
     public string GameOverlayTitle => IsRussian ? "Игровой HUD-оверлей поверх игр" : "In-Game HUD Overlay";
     public string GameOverlayDesc => IsRussian
