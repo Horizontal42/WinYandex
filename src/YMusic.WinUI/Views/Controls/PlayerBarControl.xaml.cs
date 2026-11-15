@@ -127,5 +127,21 @@ public sealed partial class PlayerBarControl : UserControl
     {
         await ViewModel.PopulatePlaylistSubItemAsync(AddToPlaylistSubItem);
     }
+
+    private async void QueueListView_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is YMusic.WinUI.Models.Track track)
+        {
+            await ViewModel.PlayQueueTrackCommand.ExecuteAsync(track);
+        }
+    }
+
+    private void RemoveFromQueueButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is FrameworkElement fe && fe.Tag is YMusic.WinUI.Models.Track track)
+        {
+            ViewModel.RemoveTrackFromQueueCommand.Execute(track);
+        }
+    }
 }
 

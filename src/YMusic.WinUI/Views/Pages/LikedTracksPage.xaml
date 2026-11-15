@@ -180,6 +180,7 @@
                                     <ColumnDefinition Width="1*" />
                                     <ColumnDefinition Width="50" />
                                     <ColumnDefinition Width="40" />
+                                    <ColumnDefinition Width="36" />
                                 </Grid.ColumnDefinitions>
 
                                 <!-- Accent Indicator Bar -->
@@ -333,6 +334,23 @@
                                     <FontIcon Glyph="{x:Bind IsLiked, Mode=OneWay, Converter={StaticResource BoolToLikeGlyphConverter}}"
                                               FontSize="16"
                                               Foreground="{x:Bind IsLiked, Mode=OneWay, Converter={StaticResource BoolToLikeBrushConverter}}" />
+                                </Button>
+
+                                <!-- Options Button (Three Dots) -->
+                                <Button Grid.Column="6"
+                                        helpers:TrackMenuHelper.OptionsButtonTrack="{x:Bind}"
+                                        Width="32"
+                                        Height="32"
+                                        Padding="0"
+                                        HorizontalAlignment="Center"
+                                        HorizontalContentAlignment="Center"
+                                        VerticalContentAlignment="Center"
+                                        CornerRadius="16"
+                                        Background="Transparent"
+                                        BorderBrush="Transparent"
+                                        helpers:CursorHelper.UseHandCursor="True"
+                                        ToolTipService.ToolTip="Дополнительно">
+                                    <FontIcon Glyph="&#xE712;" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                 </Button>
                             </Grid>
                         </Border>

@@ -80,6 +80,24 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
     }
 
     [ObservableProperty]
+    private bool _isQueueOpen;
+
+    public System.Collections.ObjectModel.ObservableCollection<Track> UpNextTracks { get; } = new();
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasUpNextTracks))]
+    private int _upNextCount;
+
+    public bool HasUpNextTracks => UpNextCount > 0;
+
+    public string QueueHeaderText => string.Format(Loc?.CurrentLanguage == "en" ? "Play Queue ({0})" : "Очередь воспроизведения ({0})", UpNextCount);
+    public string ClearQueueText => Loc?.CurrentLanguage == "en" ? "Clear" : "Очистить";
+    public string UpNextLabelText => Loc?.CurrentLanguage == "en" ? "Up Next" : "Далее в очереди";
+    public string CurrentTrackLabelText => Loc?.CurrentLanguage == "en" ? "Now Playing" : "Сейчас играет";
+    public string QueueEmptyText => Loc?.CurrentLanguage == "en" ? "Queue is empty" : "Очередь пуста";
+    public string QueueDrawerTooltip => Loc?.CurrentLanguage == "en" ? "Playback Queue" : "Очередь воспроизведения";
+
+    [ObservableProperty]
     private bool _isAutoScrollEnabled = true;
 
     [ObservableProperty]
@@ -449,6 +467,7 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
         _selectedQualityPreference = _settingsService.PreferredQuality;
         _qualityBadge = _selectedQualityPreference switch
         {
+            AudioQualityPreference.Lossless => "FLAC",
             AudioQualityPreference.AacPreferred => "AAC",
             AudioQualityPreference.Mp3Preferred => "320k",
             _ => "HQ"
@@ -525,6 +544,8 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
         _audioPlayer.MuteChanged += OnMuteChanged;
         _audioPlayer.RepeatModeChanged += OnRepeatModeChanged;
         _audioPlayer.IsShuffleChanged += OnIsShuffleChanged;
+        _audioPlayer.QueueChanged += (s, e) => RefreshUpNextTracks();
+        RefreshUpNextTracks();
         _audioPlayer.PlaybackFailed += (s, reason) =>
         {
             RunOnUi(() =>
@@ -663,6 +684,7 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
                 IsNowPlayingDrawerOpen = false;
                 IsPlaying = false;
             }
+            RefreshUpNextTracks();
         });
 
         UpdateFckCensorState();
@@ -943,12 +965,14 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
             _settingsService.PreferredQuality = preference;
             QualityBadge = preference switch
             {
+                AudioQualityPreference.Lossless => "FLAC",
                 AudioQualityPreference.AacPreferred => "AAC",
                 AudioQualityPreference.Mp3Preferred => "320k",
                 _ => "HQ"
             };
             QualityTooltip = preference switch
             {
+                AudioQualityPreference.Lossless => "Stream Quality: Lossless (FLAC, Studio Quality)",
                 AudioQualityPreference.AacPreferred => "Stream Quality: AAC Preferred (High Quality)",
                 AudioQualityPreference.Mp3Preferred => "Stream Quality: MP3 Preferred (320 kbps)",
                 _ => "Stream Quality: Best Available Bitrate"
@@ -1054,6 +1078,12 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
         OnPropertyChanged(nameof(FckReplaceTrackText));
         OnPropertyChanged(nameof(FckReportCensorshipText));
         OnPropertyChanged(nameof(FckBadgeTooltip));
+        OnPropertyChanged(nameof(QueueHeaderText));
+        OnPropertyChanged(nameof(ClearQueueText));
+        OnPropertyChanged(nameof(UpNextLabelText));
+        OnPropertyChanged(nameof(CurrentTrackLabelText));
+        OnPropertyChanged(nameof(QueueEmptyText));
+        OnPropertyChanged(nameof(QueueDrawerTooltip));
     }
 
     [RelayCommand]
@@ -1111,6 +1141,49 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
         _audioPlayer.Seek(target);
         Position = target;
         PositionSeconds = seconds;
+    }
+
+    public void RefreshUpNextTracks()
+    {
+        RunOnUi(() =>
+        {
+            var queue = _audioPlayer.UpcomingQueue;
+            UpNextTracks.Clear();
+            foreach (var t in queue)
+            {
+                UpNextTracks.Add(t);
+            }
+            UpNextCount = queue.Count;
+            OnPropertyChanged(nameof(QueueHeaderText));
+        });
+    }
+
+    [RelayCommand]
+    private void ClearQueue()
+    {
+        _audioPlayer.ReplaceUpcomingQueue(Array.Empty<Track>());
+        RefreshUpNextTracks();
+    }
+
+    [RelayCommand]
+    private void RemoveTrackFromQueue(Track? track)
+    {
+        if (track == null) return;
+        _audioPlayer.RemoveFromQueue(track);
+        RefreshUpNextTracks();
+    }
+
+    [RelayCommand]
+    private async Task PlayQueueTrackAsync(Track? track)
+    {
+        if (track == null) return;
+        await _audioPlayer.PlayTrackAsync(track).ConfigureAwait(false);
+    }
+
+    [RelayCommand]
+    private void ToggleQueueDrawer()
+    {
+        IsQueueOpen = !IsQueueOpen;
     }
 
     [RelayCommand]
@@ -1657,6 +1730,10 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
         AddDetailRow(GetLocString("TrackDetails_Artist", isEn ? "Artist:" : "Исполнитель:"), track.ArtistNames);
         AddDetailRow(GetLocString("TrackDetails_Album", isEn ? "Album:" : "Альбом:"), albumInfo);
         AddDetailRow(GetLocString("TrackDetails_Duration", isEn ? "Duration:" : "Длительность:"), track.FormattedDuration);
+        if (!string.IsNullOrWhiteSpace(track.FormattedAddedAt))
+        {
+            AddDetailRow(GetLocString("TrackDetails_AddedAt", isEn ? "Date Added:" : "Дата добавления:"), track.FormattedAddedAt);
+        }
         AddDetailRow(GetLocString("TrackDetails_Quality", isEn ? "Audio Stream:" : "Качество аудио:"), qualityInfo);
         AddDetailRow(GetLocString("TrackDetails_TrackId", isEn ? "Track ID:" : "ID трека:"), track.Id);
 

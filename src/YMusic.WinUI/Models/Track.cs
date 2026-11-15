@@ -268,6 +268,23 @@ public sealed partial class Track : ObservableObject
         return formatted;
     }
 
+    [JsonPropertyName("timestamp")]
+    public string? AddedAt { get; set; }
+
+    [JsonIgnore]
+    public string? FormattedAddedAt
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(AddedAt)) return null;
+            if (DateTimeOffset.TryParse(AddedAt, out var dto))
+            {
+                return dto.ToLocalTime().ToString("g");
+            }
+            return AddedAt;
+        }
+    }
+
     public static bool IsSameTrackId(string? id1, string? id2)
     {
         if (string.IsNullOrWhiteSpace(id1) || string.IsNullOrWhiteSpace(id2))

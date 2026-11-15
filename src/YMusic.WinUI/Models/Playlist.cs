@@ -141,7 +141,14 @@ public sealed partial class Playlist : ObservableObject
     [JsonIgnore]
     public List<Track> ResolvedTracks => Tracks
         .Where(t => t.Track != null)
-        .Select(t => t.Track!)
+        .Select(t =>
+        {
+            if (!string.IsNullOrWhiteSpace(t.Timestamp))
+            {
+                t.Track!.AddedAt = t.Timestamp;
+            }
+            return t.Track!;
+        })
         .ToList();
 
     [JsonIgnore]

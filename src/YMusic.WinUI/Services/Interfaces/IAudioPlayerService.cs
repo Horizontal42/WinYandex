@@ -19,6 +19,7 @@ public interface IAudioPlayerService : IDisposable
     bool IsPreloadingEnabled { get; set; }
 
     IReadOnlyList<Track> Queue { get; }
+    IReadOnlyList<Track> UpcomingQueue { get; }
     int CurrentIndex { get; }
 
     PlaybackMode CurrentPlaybackMode { get; set; }
@@ -41,6 +42,7 @@ public interface IAudioPlayerService : IDisposable
     Task PlayQueueAsync(IEnumerable<Track> queue, int startIndex = 0);
     void AppendToQueue(IEnumerable<Track> tracks);
     void PlayNext(Track track);
+    void RemoveFromQueue(Track track);
     void ReplaceUpcomingQueue(IEnumerable<Track> newUpcomingTracks);
     void Play();
     void Pause();

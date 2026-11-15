@@ -458,6 +458,156 @@
                           Foreground="{x:Bind ViewModel.IsNowPlayingDrawerOpen, Mode=OneWay, Converter={StaticResource BoolToAccentBrushConverter}}" />
             </Button>
 
+            <!-- Playback Queue Flyout Button -->
+            <Button Width="36"
+                    Height="36"
+                    CornerRadius="18"
+                    Padding="0"
+                    HorizontalContentAlignment="Center"
+                    VerticalContentAlignment="Center"
+                    Background="Transparent"
+                    BorderBrush="Transparent"
+                    helpers:CursorHelper.UseHandCursor="True"
+                    ToolTipService.ToolTip="{x:Bind ViewModel.QueueDrawerTooltip, Mode=OneWay}">
+                <FontIcon Glyph="&#xE90B;"
+                          FontSize="16" />
+                <Button.Flyout>
+                    <Flyout Placement="Top" ShouldConstrainToRootBounds="True">
+                        <Flyout.FlyoutPresenterStyle>
+                            <Style TargetType="FlyoutPresenter">
+                                <Setter Property="MinWidth" Value="380" />
+                                <Setter Property="MaxWidth" Value="420" />
+                                <Setter Property="MaxHeight" Value="520" />
+                                <Setter Property="Padding" Value="14" />
+                            </Style>
+                        </Flyout.FlyoutPresenterStyle>
+                        <Grid RowSpacing="12">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <!-- Header: Title and Clear Button -->
+                            <Grid Grid.Row="0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{x:Bind ViewModel.QueueHeaderText, Mode=OneWay}"
+                                           FontWeight="SemiBold"
+                                           FontSize="15"
+                                           VerticalAlignment="Center" />
+                                <Button Grid.Column="1"
+                                        Content="{x:Bind ViewModel.ClearQueueText, Mode=OneWay}"
+                                        Command="{x:Bind ViewModel.ClearQueueCommand}"
+                                        FontSize="12"
+                                        Padding="8,4"
+                                        CornerRadius="4"
+                                        Background="Transparent"
+                                        BorderBrush="Transparent"
+                                        Foreground="{ThemeResource AccentFillColorDefaultBrush}"
+                                        helpers:CursorHelper.UseHandCursor="True" />
+                            </Grid>
+
+                            <!-- Currently Playing Mini Card -->
+                            <Border Grid.Row="1"
+                                    Visibility="{x:Bind ViewModel.HasTrack, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+                                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    Padding="10">
+                                <Grid ColumnSpacing="10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="40" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Border Width="40" Height="40" CornerRadius="4" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
+                                        <Image Source="{x:Bind ViewModel.CoverUrl, Mode=OneWay, Converter={StaticResource StringToImageSourceConverter}}"
+                                               Stretch="UniformToFill" />
+                                    </Border>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="{x:Bind ViewModel.CurrentTrackLabelText, Mode=OneWay}"
+                                                   FontSize="10"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                                        <TextBlock Text="{x:Bind ViewModel.TrackTitle, Mode=OneWay}"
+                                                   FontSize="13"
+                                                   FontWeight="Medium"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   MaxLines="1" />
+                                        <TextBlock Text="{x:Bind ViewModel.ArtistNames, Mode=OneWay}"
+                                                   FontSize="11"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                   TextTrimming="CharacterEllipsis"
+                                                   MaxLines="1" />
+                                    </StackPanel>
+                                </Grid>
+                            </Border>
+
+                            <!-- Up Next List -->
+                            <Grid Grid.Row="2">
+                                <TextBlock Text="{x:Bind ViewModel.QueueEmptyText, Mode=OneWay}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                           FontSize="13"
+                                           Margin="0,20,0,20"
+                                           Visibility="{x:Bind ViewModel.HasUpNextTracks, Mode=OneWay, Converter={StaticResource InvertedBoolToVisibilityConverter}}" />
+
+                                <ListView ItemsSource="{x:Bind ViewModel.UpNextTracks, Mode=OneWay}"
+                                          Visibility="{x:Bind ViewModel.HasUpNextTracks, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+                                          SelectionMode="None"
+                                          IsItemClickEnabled="True"
+                                          ItemClick="QueueListView_ItemClick"
+                                          MaxHeight="360">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="models:Track">
+                                            <Grid Margin="0,4" ColumnSpacing="10">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="34" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="34" Height="34" CornerRadius="4" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
+                                                    <Image Source="{x:Bind CoverUrl, Converter={StaticResource StringToImageSourceConverter}}"
+                                                           Stretch="UniformToFill" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock Text="{x:Bind FullTitle}"
+                                                               FontSize="13"
+                                                               FontWeight="Normal"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               MaxLines="1" />
+                                                    <TextBlock Text="{x:Bind ArtistNames}"
+                                                               FontSize="11"
+                                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               MaxLines="1" />
+                                                </StackPanel>
+                                                <Button Grid.Column="2"
+                                                        Width="28"
+                                                        Height="28"
+                                                        Padding="0"
+                                                        CornerRadius="14"
+                                                        Background="Transparent"
+                                                        BorderBrush="Transparent"
+                                                        Click="RemoveFromQueueButton_Click"
+                                                        Tag="{x:Bind}"
+                                                        helpers:CursorHelper.UseHandCursor="True">
+                                                    <FontIcon Glyph="&#xE711;" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                </Button>
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </Grid>
+                        </Grid>
+                    </Flyout>
+                </Button.Flyout>
+            </Button>
+
             <!-- Audio Quality Pill & Selector Flyout -->
             <Button Visibility="{x:Bind ViewModel.ShowQualityBadge, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
                     Height="28"
@@ -476,6 +626,9 @@
                            Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
                 <Button.Flyout>
                     <MenuFlyout Placement="Top" ShouldConstrainToRootBounds="True">
+                        <MenuFlyoutItem Text="Lossless (FLAC, Hi-Fi)"
+                                        Command="{x:Bind ViewModel.SetAudioQualityPreferenceCommand}"
+                                        CommandParameter="Lossless" />
                         <MenuFlyoutItem Text="AAC (High Quality, 192–256 kbps)"
                                         Command="{x:Bind ViewModel.SetAudioQualityPreferenceCommand}"
                                         CommandParameter="AacPreferred" />

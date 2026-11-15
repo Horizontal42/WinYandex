@@ -53,6 +53,7 @@ public partial class App : Application
         var services = new ServiceCollection();
 
         // Core services
+        services.AddSingleton<IFlacStreamProxy, FlacStreamProxy>();
         services.AddSingleton<ICredentialStorageService, CredentialStorageService>();
         services.AddSingleton<IPlaybackStateStorageService, PlaybackStateStorageService>();
         services.AddSingleton<IYandexMusicService, YandexMusicService>();

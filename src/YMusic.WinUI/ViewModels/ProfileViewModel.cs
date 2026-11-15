@@ -760,9 +760,10 @@ public sealed partial class ProfileViewModel : BaseViewModel
         {
             SelectedQualityIndex = _settingsService.PreferredQuality switch
             {
-                AudioQualityPreference.AacPreferred => 0,
-                AudioQualityPreference.Mp3Preferred => 1,
-                _ => 2
+                AudioQualityPreference.Lossless => 0,
+                AudioQualityPreference.AacPreferred => 1,
+                AudioQualityPreference.Mp3Preferred => 2,
+                _ => 3
             };
 
             IsGaplessPreloadEnabled = _settingsService.GaplessPreloadEnabled;
@@ -881,9 +882,10 @@ public sealed partial class ProfileViewModel : BaseViewModel
             {
                 int newIndex = _settingsService.PreferredQuality switch
                 {
-                    AudioQualityPreference.AacPreferred => 0,
-                    AudioQualityPreference.Mp3Preferred => 1,
-                    _ => 2
+                    AudioQualityPreference.Lossless => 0,
+                    AudioQualityPreference.AacPreferred => 1,
+                    AudioQualityPreference.Mp3Preferred => 2,
+                    _ => 3
                 };
                 if (SelectedQualityIndex != newIndex) SelectedQualityIndex = newIndex;
             }
@@ -1093,14 +1095,19 @@ public sealed partial class ProfileViewModel : BaseViewModel
 
         var pref = value switch
         {
-            0 => AudioQualityPreference.AacPreferred,
-            1 => AudioQualityPreference.Mp3Preferred,
+            0 => AudioQualityPreference.Lossless,
+            1 => AudioQualityPreference.AacPreferred,
+            2 => AudioQualityPreference.Mp3Preferred,
             _ => AudioQualityPreference.HighestBitrate
         };
         _settingsService.PreferredQuality = pref;
-        string qualityName = value == 0
-            ? (IsRussian ? "AAC (Рекомендуется)" : "AAC Preferred")
-            : (value == 1 ? "MP3 320k" : (IsRussian ? "Наивысший битрейт" : "Highest Bitrate"));
+        string qualityName = value switch
+        {
+            0 => "Lossless (FLAC)",
+            1 => (IsRussian ? "AAC (Рекомендуется)" : "AAC Preferred"),
+            2 => "MP3 320k",
+            _ => (IsRussian ? "Наивысший битрейт" : "Highest Bitrate")
+        };
         ShowNotification(IsRussian ? $"Качество аудио обновлено: {qualityName}" : $"Audio quality updated to: {qualityName}");
     }
 
@@ -2189,12 +2196,14 @@ public sealed partial class ProfileViewModel : BaseViewModel
             QualityOptions.Clear();
             if (IsRussian)
             {
+                QualityOptions.Add("Lossless (FLAC) • Студийное качество");
                 QualityOptions.Add("AAC (192–256 kbps) • Рекомендуется");
                 QualityOptions.Add("MP3 (320 kbps) • Постоянный битрейт");
                 QualityOptions.Add("Наивысший доступный битрейт");
             }
             else
             {
+                QualityOptions.Add("Lossless (FLAC) • Studio Quality");
                 QualityOptions.Add("AAC (192–256 kbps) • Recommended");
                 QualityOptions.Add("MP3 (320 kbps) • Constant Bitrate");
                 QualityOptions.Add("Highest Bitrate Available");

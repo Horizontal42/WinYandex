@@ -53,6 +53,7 @@ public sealed partial class YandexMusicService : IYandexMusicService
     };
     private string? _cachedUserId;
     private string? _token;
+    private readonly IFlacStreamProxy? _flacProxy;
 
     public event EventHandler? UnauthorizedResponseReceived;
     public event EventHandler? RegionRestrictionDetected;
@@ -66,9 +67,10 @@ public sealed partial class YandexMusicService : IYandexMusicService
 
     public string? CurrentToken => _token;
 
-    public YandexMusicService(ICredentialStorageService? credentialStorage = null, HttpClient? httpClient = null)
+    public YandexMusicService(ICredentialStorageService? credentialStorage = null, HttpClient? httpClient = null, IFlacStreamProxy? flacProxy = null)
     {
         _credentialStorage = credentialStorage;
+        _flacProxy = flacProxy;
         _httpClient = httpClient ?? new HttpClient(YandexBypassProxy.CreateHandler(TimeSpan.FromSeconds(10), TimeSpan.FromMinutes(15)));
         _httpClient.BaseAddress = new Uri(ApiBaseUrl);
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(UserAgentHeader);
@@ -1833,6 +1835,21 @@ public sealed partial class YandexMusicService : IYandexMusicService
             return (cached.Url, cached.Quality);
         }
 
+        // If Lossless is preferred (or HighestBitrate), try requesting true FLAC from get-file-info first
+        if (PreferredQuality == AudioQualityPreference.Lossless || PreferredQuality == AudioQualityPreference.HighestBitrate)
+        {
+            var flacResult = await TryGetLosslessStreamAsync(trackId, cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(flacResult.Url) && flacResult.Quality != null)
+            {
+                if (PreferredQuality == AudioQualityPreference.Lossless ||
+                    string.Equals(flacResult.Quality.Codec, "flac", StringComparison.OrdinalIgnoreCase))
+                {
+                    _streamInfoCache[trackId] = (flacResult.Url, flacResult.Quality, DateTime.UtcNow.AddMinutes(50));
+                    return flacResult;
+                }
+            }
+        }
+
         using var downloadInfoResponse = await SendRequestAsync(HttpMethod.Get, $"tracks/{trackId}/download-info", null, cancellationToken).ConfigureAwait(false);
         if (downloadInfoResponse == null || !downloadInfoResponse.IsSuccessStatusCode)
         {
@@ -1924,6 +1941,85 @@ public sealed partial class YandexMusicService : IYandexMusicService
         }
 
         return (directUrl, quality);
+    }
+
+    private const string DesktopAppSecret = "kzqU4XhfCaY6B6JTHODeq5";
+
+    private async Task<(string? Url, StreamAudioQuality? Quality)> TryGetLosslessStreamAsync(string trackId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(_token) || _flacProxy == null) return (null, null);
+
+        try
+        {
+            long timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            string codecsParam = "flac-mp4,flac,aac,he-aac,mp3";
+            string codecsSign = "flac-mp4flacaache-aacmp3";
+            string transportsParam = "encraw,raw";
+            string transportsSign = "encrawraw";
+
+            string rawToSign = $"{timestamp}{trackId}lossless{codecsSign}{transportsSign}";
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(DesktopAppSecret));
+            byte[] hash = hmac.ComputeHash(Encoding.UTF8.GetBytes(rawToSign));
+            string sign = Convert.ToBase64String(hash).TrimEnd('=');
+
+            string requestUrl = $"https://api.music.yandex.net/get-file-info?ts={timestamp}&trackId={trackId}&quality=lossless&codecs={codecsParam}&transports={transportsParam}&sign={Uri.EscapeDataString(sign)}";
+
+            using var req = new HttpRequestMessage(HttpMethod.Get, requestUrl);
+            req.Headers.Authorization = new AuthenticationHeaderValue("OAuth", _token);
+            req.Headers.Add("X-Yandex-Music-Client", "YandexMusicDesktopAppWindows/5.13.2");
+
+            using var resp = await _httpClient.SendAsync(req, cancellationToken).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                return (null, null);
+            }
+
+            var json = await resp.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using var doc = JsonDocument.Parse(json);
+            if (!doc.RootElement.TryGetProperty("result", out var resultEl) ||
+                !resultEl.TryGetProperty("downloadInfo", out var dlInfo))
+            {
+                return (null, null);
+            }
+
+            string? codec = dlInfo.TryGetProperty("codec", out var cProp) ? cProp.GetString() : null;
+            string? transport = dlInfo.TryGetProperty("transport", out var tProp) ? tProp.GetString() : null;
+            string? streamUrl = dlInfo.TryGetProperty("url", out var uProp) ? uProp.GetString() : null;
+            string? keyHex = dlInfo.TryGetProperty("key", out var kProp) ? kProp.GetString() : null;
+            int bitrate = dlInfo.TryGetProperty("bitrate", out var bProp) && bProp.TryGetInt32(out int bVal) ? bVal : 0;
+
+            if (string.IsNullOrWhiteSpace(streamUrl)) return (null, null);
+
+            if (string.Equals(codec, "flac-mp4", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(transport, "encraw", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrWhiteSpace(keyHex))
+            {
+                byte[] keyBytes = Convert.FromHexString(keyHex);
+                string proxyUrl = _flacProxy.RegisterStream(trackId, streamUrl, keyBytes);
+                var q = new StreamAudioQuality { Codec = "flac", BitrateInKbps = 1411 };
+                return (proxyUrl, q);
+            }
+
+            if (string.Equals(codec, "flac", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(transport, "raw", StringComparison.OrdinalIgnoreCase))
+            {
+                var q = new StreamAudioQuality { Codec = "flac", BitrateInKbps = 1411 };
+                return (streamUrl, q);
+            }
+
+            if (string.Equals(codec, "mp3", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(transport, "raw", StringComparison.OrdinalIgnoreCase))
+            {
+                var q = new StreamAudioQuality { Codec = "mp3", BitrateInKbps = bitrate > 0 ? bitrate : 320 };
+                return (streamUrl, q);
+            }
+        }
+        catch (Exception ex)
+        {
+            Debug.WriteLine($"[YandexMusicService] TryGetLosslessStreamAsync failed: {ex.Message}");
+        }
+
+        return (null, null);
     }
 
     public async Task<RotorStationResult?> GetRotorStationTracksAsync(

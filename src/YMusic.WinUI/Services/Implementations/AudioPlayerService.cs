@@ -158,6 +158,25 @@ public sealed class AudioPlayerService : IAudioPlayerService
     }
 
     public IReadOnlyList<Track> Queue => _queue;
+
+    public IReadOnlyList<Track> UpcomingQueue
+    {
+        get
+        {
+            if (_orderIndex < 0 || _orderIndex >= _playOrder.Count) return Array.Empty<Track>();
+            var list = new List<Track>();
+            for (int i = _orderIndex + 1; i < _playOrder.Count; i++)
+            {
+                int trackIdx = _playOrder[i];
+                if (trackIdx >= 0 && trackIdx < _queue.Count)
+                {
+                    list.Add(_queue[trackIdx]);
+                }
+            }
+            return list.AsReadOnly();
+        }
+    }
+
     public int CurrentIndex => (_orderIndex >= 0 && _orderIndex < _playOrder.Count)
         ? _playOrder[_orderIndex]
         : -1;
@@ -739,6 +758,18 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
         QueueChanged?.Invoke(this, EventArgs.Empty);
         RequestSaveState();
+    }
+
+    public void RemoveFromQueue(Track track)
+    {
+        if (track == null || _queue.Count == 0) return;
+        var upcoming = UpcomingQueue.ToList();
+        int idx = upcoming.FindIndex(t => Track.IsSameTrackId(t.Id, track.Id));
+        if (idx >= 0)
+        {
+            upcoming.RemoveAt(idx);
+            ReplaceUpcomingQueue(upcoming);
+        }
     }
 
     public void Play()

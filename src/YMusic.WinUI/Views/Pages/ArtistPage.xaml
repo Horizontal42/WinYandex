@@ -171,6 +171,8 @@
                                             <ColumnDefinition Width="Auto" />
                                             <!-- Duration -->
                                             <ColumnDefinition Width="Auto" />
+                                            <!-- Options Button -->
+                                            <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
 
                                         <!-- Cover Artwork with Play / Equalizer Overlay -->
@@ -278,6 +280,20 @@
                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                                    VerticalAlignment="Center"
                                                    Margin="8,0,4,0" />
+
+                                        <!-- Options Button (Three Dots) -->
+                                        <Button Grid.Column="4"
+                                                helpers:TrackMenuHelper.OptionsButtonTrack="{x:Bind}"
+                                                Width="32"
+                                                Height="32"
+                                                Padding="0"
+                                                CornerRadius="16"
+                                                Background="Transparent"
+                                                BorderBrush="Transparent"
+                                                helpers:CursorHelper.UseHandCursor="True"
+                                                ToolTipService.ToolTip="Дополнительно">
+                                            <FontIcon Glyph="&#xE712;" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </Button>
                                     </Grid>
                                 </Button>
                             </DataTemplate>

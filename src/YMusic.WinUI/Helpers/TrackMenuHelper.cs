@@ -32,6 +32,41 @@ public static class TrackMenuHelper
     public static Track? GetTrack(DependencyObject obj) => (Track?)obj.GetValue(TrackProperty);
     public static void SetTrack(DependencyObject obj, Track? value) => obj.SetValue(TrackProperty, value);
 
+    public static readonly DependencyProperty OptionsButtonTrackProperty =
+        DependencyProperty.RegisterAttached(
+            "OptionsButtonTrack",
+            typeof(Track),
+            typeof(TrackMenuHelper),
+            new PropertyMetadata(null, OnOptionsButtonTrackChanged));
+
+    public static Track? GetOptionsButtonTrack(DependencyObject obj) => (Track?)obj.GetValue(OptionsButtonTrackProperty);
+    public static void SetOptionsButtonTrack(DependencyObject obj, Track? value) => obj.SetValue(OptionsButtonTrackProperty, value);
+
+    private static void OnOptionsButtonTrackChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is Button btn)
+        {
+            btn.Click -= OptionsButton_Click;
+            if (e.NewValue is Track)
+            {
+                btn.Click += OptionsButton_Click;
+            }
+        }
+    }
+
+    private static void OptionsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn)
+        {
+            var track = GetOptionsButtonTrack(btn);
+            if (track != null)
+            {
+                var flyout = CreateMenuFlyout(track);
+                flyout.ShowAt(btn);
+            }
+        }
+    }
+
     private static void OnTrackChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is FrameworkElement element)
@@ -295,7 +330,23 @@ public static class TrackMenuHelper
         }
         catch { }
 
-        // 7. Share
+        // 7. Show Lyrics
+        var lyricsItem = new MenuFlyoutItem
+        {
+            Text = GetLoc("TrackMenu_ShowLyrics", isEn ? "Show lyrics" : "Текст песни"),
+            Icon = new FontIcon { Glyph = "\uEC4F" }
+        };
+        lyricsItem.Click += async (s, e) =>
+        {
+            if (!Track.IsSameTrackId(audioPlayer.CurrentTrack?.Id, track.Id))
+            {
+                await audioPlayer.PlayTrackAsync(track);
+            }
+            playerVm.IsNowPlayingDrawerOpen = true;
+        };
+        flyout.Items.Add(lyricsItem);
+
+        // 8. Share
         var shareItem = new MenuFlyoutItem
         {
             Text = GetLoc("TrackMenu_Share", isEn ? "Share" : "Поделиться"),
@@ -422,6 +473,10 @@ public static class TrackMenuHelper
             AddDetailRow(GetLoc("TrackDetails_Artist", isEn ? "Artist:" : "Исполнитель:"), track.ArtistNames);
             AddDetailRow(GetLoc("TrackDetails_Album", isEn ? "Album:" : "Альбом:"), albumInfo);
             AddDetailRow(GetLoc("TrackDetails_Duration", isEn ? "Duration:" : "Длительность:"), track.FormattedDuration);
+            if (!string.IsNullOrWhiteSpace(track.FormattedAddedAt))
+            {
+                AddDetailRow(GetLoc("TrackDetails_AddedAt", isEn ? "Date Added:" : "Дата добавления:"), track.FormattedAddedAt);
+            }
             AddDetailRow(GetLoc("TrackDetails_TrackId", isEn ? "Track ID:" : "ID трека:"), track.Id);
 
             var dialog = new ContentDialog

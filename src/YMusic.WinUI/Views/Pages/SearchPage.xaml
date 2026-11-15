@@ -420,6 +420,7 @@
                                                         <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="60" />
                                                         <ColumnDefinition Width="36" />
+                                                        <ColumnDefinition Width="32" />
                                                     </Grid.ColumnDefinitions>
 
                                                     <!-- Indicator -->
@@ -511,6 +512,16 @@
                                                         <FontIcon Glyph="{x:Bind IsLiked, Mode=OneWay, Converter={StaticResource BoolToLikeGlyphConverter}}"
                                                                   FontSize="14"
                                                                   Foreground="{x:Bind IsLiked, Mode=OneWay, Converter={StaticResource BoolToLikeBrushConverter}}" />
+                                                    </Button>
+
+                                                    <!-- Options Button (Three Dots) -->
+                                                    <Button Grid.Column="5"
+                                                            helpers:TrackMenuHelper.OptionsButtonTrack="{x:Bind}"
+                                                            Width="28" Height="28" Padding="0" CornerRadius="14"
+                                                            Background="Transparent" BorderBrush="Transparent"
+                                                            helpers:CursorHelper.UseHandCursor="True"
+                                                            ToolTipService.ToolTip="Дополнительно">
+                                                        <FontIcon Glyph="&#xE712;" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                                     </Button>
                                                 </Grid>
                                             </Button>
@@ -672,6 +683,7 @@
                                                 <ColumnDefinition Width="2*" />
                                                 <ColumnDefinition Width="60" />
                                                 <ColumnDefinition Width="40" />
+                                                <ColumnDefinition Width="36" />
                                             </Grid.ColumnDefinitions>
 
                                             <!-- Accent Playing Indicator -->
@@ -759,6 +771,16 @@
                                                 <FontIcon Glyph="{x:Bind IsLiked, Mode=OneWay, Converter={StaticResource BoolToLikeGlyphConverter}}"
                                                           FontSize="16"
                                                           Foreground="{x:Bind IsLiked, Mode=OneWay, Converter={StaticResource BoolToLikeBrushConverter}}" />
+                                            </Button>
+
+                                            <!-- Options Button (Three Dots) -->
+                                            <Button Grid.Column="6"
+                                                    helpers:TrackMenuHelper.OptionsButtonTrack="{x:Bind}"
+                                                    Width="32" Height="32" Padding="0" CornerRadius="16"
+                                                    Background="Transparent" BorderBrush="Transparent"
+                                                    helpers:CursorHelper.UseHandCursor="True"
+                                                    ToolTipService.ToolTip="Дополнительно">
+                                                <FontIcon Glyph="&#xE712;" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                             </Button>
                                         </Grid>
                                     </Button>
