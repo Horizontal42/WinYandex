@@ -35,7 +35,10 @@ public sealed class StreamAudioQuality
         {
             if (string.IsNullOrWhiteSpace(Codec)) return "HQ";
             if (Codec.StartsWith("flac", StringComparison.OrdinalIgnoreCase)) return "FLAC";
-            if (Codec.Equals("aac", StringComparison.OrdinalIgnoreCase)) return "AAC";
+            if (Codec.Equals("aac", StringComparison.OrdinalIgnoreCase) || Codec.Equals("he-aac", StringComparison.OrdinalIgnoreCase))
+            {
+                return BitrateInKbps > 0 ? $"AAC {BitrateInKbps}k" : "AAC";
+            }
             if (BitrateInKbps >= 320) return "320k";
             return $"{BitrateInKbps}k";
         }

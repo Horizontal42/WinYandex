@@ -16,6 +16,7 @@ public interface IYandexMusicService
     Task<(UserProfile? Profile, string? Error)> GetAccountStatusDetailedAsync(CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<string>> GetLikedTrackIdsAsync(string userId, CancellationToken cancellationToken = default);
+    string? GetTrackAddedAt(string trackId);
     Task<bool> LikeTrackAsync(string trackId, CancellationToken cancellationToken = default);
     Task<bool> UnlikeTrackAsync(string trackId, CancellationToken cancellationToken = default);
     bool IsTrackLiked(string trackId);

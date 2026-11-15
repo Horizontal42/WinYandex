@@ -684,6 +684,13 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
                 IsNowPlayingDrawerOpen = false;
                 IsPlaying = false;
             }
+            if (_audioPlayer.CurrentQuality != null)
+            {
+                CurrentQuality = _audioPlayer.CurrentQuality;
+                QualityBadge = _audioPlayer.CurrentQuality.BadgeText;
+                string cacheStatus = _audioPlayer.CurrentQuality.IsCached ? " • Local Disk Cache (0 ms)" : string.Empty;
+                QualityTooltip = $"Preferred: {GetPreferenceDisplayName(SelectedQualityPreference)} • Active: {_audioPlayer.CurrentQuality.DisplayText}{cacheStatus}";
+            }
             RefreshUpNextTracks();
         });
 
@@ -1730,9 +1737,18 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
         AddDetailRow(GetLocString("TrackDetails_Artist", isEn ? "Artist:" : "Исполнитель:"), track.ArtistNames);
         AddDetailRow(GetLocString("TrackDetails_Album", isEn ? "Album:" : "Альбом:"), albumInfo);
         AddDetailRow(GetLocString("TrackDetails_Duration", isEn ? "Duration:" : "Длительность:"), track.FormattedDuration);
-        if (!string.IsNullOrWhiteSpace(track.FormattedAddedAt))
+        string? addedAt = track.FormattedAddedAt;
+        if (string.IsNullOrWhiteSpace(addedAt))
         {
-            AddDetailRow(GetLocString("TrackDetails_AddedAt", isEn ? "Date Added:" : "Дата добавления:"), track.FormattedAddedAt);
+            var rawTs = _musicService?.GetTrackAddedAt(track.Id);
+            if (!string.IsNullOrWhiteSpace(rawTs))
+            {
+                addedAt = DateTimeOffset.TryParse(rawTs, out var dto) ? dto.ToLocalTime().ToString("g") : rawTs;
+            }
+        }
+        if (!string.IsNullOrWhiteSpace(addedAt))
+        {
+            AddDetailRow(GetLocString("TrackDetails_AddedAt", isEn ? "Date Added:" : "Дата добавления:"), addedAt);
         }
         AddDetailRow(GetLocString("TrackDetails_Quality", isEn ? "Audio Stream:" : "Качество аудио:"), qualityInfo);
         AddDetailRow(GetLocString("TrackDetails_TrackId", isEn ? "Track ID:" : "ID трека:"), track.Id);

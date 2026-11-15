@@ -152,6 +152,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
                 _isShuffle = value;
                 RebuildPlayOrder();
                 IsShuffleChanged?.Invoke(this, value);
+                QueueChanged?.Invoke(this, EventArgs.Empty);
                 RequestSaveState();
             }
         }
@@ -605,7 +606,16 @@ public sealed class AudioPlayerService : IAudioPlayerService
             int trackIndex = _queue.FindIndex(t => Track.IsSameTrackId(t.Id, track.Id));
             if (trackIndex >= 0)
             {
-                _orderIndex = _playOrder.IndexOf(trackIndex);
+                if (_isShuffle)
+                {
+                    _playOrder.Remove(trackIndex);
+                    _playOrder.Insert(0, trackIndex);
+                    _orderIndex = 0;
+                }
+                else
+                {
+                    _orderIndex = _playOrder.IndexOf(trackIndex);
+                }
             }
             else
             {
@@ -620,7 +630,16 @@ public sealed class AudioPlayerService : IAudioPlayerService
             int existing = _queue.FindIndex(t => Track.IsSameTrackId(t.Id, track.Id));
             if (existing >= 0)
             {
-                _orderIndex = _playOrder.IndexOf(existing);
+                if (_isShuffle)
+                {
+                    _playOrder.Remove(existing);
+                    _playOrder.Insert(0, existing);
+                    _orderIndex = 0;
+                }
+                else
+                {
+                    _orderIndex = _playOrder.IndexOf(existing);
+                }
             }
             else
             {
@@ -652,21 +671,50 @@ public sealed class AudioPlayerService : IAudioPlayerService
             QueueChanged?.Invoke(this, EventArgs.Empty);
         }
 
-        int targetIndex = Math.Clamp(startIndex, 0, _queue.Count - 1);
-        if (!_queue[targetIndex].Available)
+        int targetIndex;
+        if (_isShuffle && startIndex == 0)
         {
-            int firstAvailable = _queue.FindIndex(targetIndex, t => t.Available);
-            if (firstAvailable < 0) firstAvailable = _queue.FindIndex(t => t.Available);
-            if (firstAvailable >= 0)
+            // Shuffling from beginning of the list: play the first track in shuffle order
+            _orderIndex = 0;
+            targetIndex = (_playOrder.Count > 0) ? _playOrder[0] : 0;
+            if (targetIndex >= 0 && targetIndex < _queue.Count && !_queue[targetIndex].Available)
             {
-                targetIndex = firstAvailable;
+                int firstAvail = _playOrder.FindIndex(idx => idx >= 0 && idx < _queue.Count && _queue[idx].Available);
+                if (firstAvail >= 0)
+                {
+                    _orderIndex = firstAvail;
+                    targetIndex = _playOrder[firstAvail];
+                }
+            }
+        }
+        else
+        {
+            targetIndex = Math.Clamp(startIndex, 0, _queue.Count - 1);
+            if (!_queue[targetIndex].Available)
+            {
+                int firstAvailable = _queue.FindIndex(targetIndex, t => t.Available);
+                if (firstAvailable < 0) firstAvailable = _queue.FindIndex(t => t.Available);
+                if (firstAvailable >= 0)
+                {
+                    targetIndex = firstAvailable;
+                }
+                else
+                {
+                    return;
+                }
+            }
+
+            if (_isShuffle)
+            {
+                _playOrder.Remove(targetIndex);
+                _playOrder.Insert(0, targetIndex);
+                _orderIndex = 0;
             }
             else
             {
-                return;
+                _orderIndex = _playOrder.IndexOf(targetIndex);
             }
         }
-        _orderIndex = _playOrder.IndexOf(targetIndex);
 
         var trackToPlay = _queue[targetIndex];
         await LoadAndPlayTrackAsync(trackToPlay).ConfigureAwait(false);
@@ -1888,15 +1936,59 @@ public sealed class AudioPlayerService : IAudioPlayerService
     private void RebuildPlayOrder()
     {
         int count = _queue.Count;
-        _playOrder = Enumerable.Range(0, count).ToList();
+        if (count == 0)
+        {
+            _playOrder = new List<int>();
+            _orderIndex = -1;
+            return;
+        }
+
+        // Determine current track index in _queue
+        int currentTrackIndex = -1;
+        if (_orderIndex >= 0 && _orderIndex < _playOrder.Count)
+        {
+            currentTrackIndex = _playOrder[_orderIndex];
+        }
+        else if (_currentTrack != null)
+        {
+            currentTrackIndex = _queue.FindIndex(t => Track.IsSameTrackId(t.Id, _currentTrack.Id));
+        }
 
         if (_isShuffle && count > 1)
         {
-            // Fisher-Yates shuffle
-            for (int i = count - 1; i > 0; i--)
+            if (currentTrackIndex >= 0)
             {
-                int j = RandomNumberGenerator.GetInt32(i + 1);
-                (_playOrder[i], _playOrder[j]) = (_playOrder[j], _playOrder[i]);
+                var others = Enumerable.Range(0, count).Where(i => i != currentTrackIndex).ToList();
+                for (int i = others.Count - 1; i > 0; i--)
+                {
+                    int j = RandomNumberGenerator.GetInt32(i + 1);
+                    (others[i], others[j]) = (others[j], others[i]);
+                }
+                _playOrder = new List<int>(count) { currentTrackIndex };
+                _playOrder.AddRange(others);
+                _orderIndex = 0;
+            }
+            else
+            {
+                _playOrder = Enumerable.Range(0, count).ToList();
+                for (int i = count - 1; i > 0; i--)
+                {
+                    int j = RandomNumberGenerator.GetInt32(i + 1);
+                    (_playOrder[i], _playOrder[j]) = (_playOrder[j], _playOrder[i]);
+                }
+                _orderIndex = 0;
+            }
+        }
+        else
+        {
+            _playOrder = Enumerable.Range(0, count).ToList();
+            if (currentTrackIndex >= 0)
+            {
+                _orderIndex = currentTrackIndex;
+            }
+            else
+            {
+                _orderIndex = Math.Clamp(_orderIndex, 0, count - 1);
             }
         }
     }

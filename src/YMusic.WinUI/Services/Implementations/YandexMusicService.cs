@@ -30,6 +30,7 @@ public sealed partial class YandexMusicService : IYandexMusicService
     private readonly HashSet<long> _presavedAlbumIds = new();
     private readonly HashSet<string> _likedPlaylistKeys = new();
     private readonly HashSet<long> _likedArtistIds = new();
+    private readonly ConcurrentDictionary<string, string> _likedTrackTimestamps = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, List<LyricLine>> _lyricsCache = new();
     private readonly ConcurrentDictionary<long, (Album Album, DateTime CachedAt)> _albumWithTracksCache = new();
     private readonly ConcurrentDictionary<string, (Playlist Playlist, DateTime CachedAt)> _playlistWithTracksCache = new();
@@ -187,6 +188,11 @@ public sealed partial class YandexMusicService : IYandexMusicService
         }
     }
 
+    public string? GetTrackAddedAt(string trackId)
+    {
+        return !string.IsNullOrEmpty(trackId) && _likedTrackTimestamps.TryGetValue(trackId, out var ts) ? ts : null;
+    }
+
     public async Task<IReadOnlyList<string>> GetLikedTrackIdsAsync(string userId, CancellationToken cancellationToken = default)
     {
         using var response = await SendRequestAsync(HttpMethod.Get, $"users/{userId}/likes/tracks", null, cancellationToken).ConfigureAwait(false);
@@ -234,6 +240,16 @@ public sealed partial class YandexMusicService : IYandexMusicService
                         if (!string.IsNullOrWhiteSpace(idStr))
                         {
                             ids.Add(idStr);
+                            if (item.TryGetProperty("timestamp", out var tsProp))
+                            {
+                                var tsStr = tsProp.ValueKind == JsonValueKind.String
+                                    ? tsProp.GetString()
+                                    : (tsProp.ValueKind == JsonValueKind.Number ? tsProp.GetRawText() : null);
+                                if (!string.IsNullOrWhiteSpace(tsStr))
+                                {
+                                    _likedTrackTimestamps[idStr] = tsStr;
+                                }
+                            }
                         }
                     }
                 }
@@ -252,6 +268,16 @@ public sealed partial class YandexMusicService : IYandexMusicService
                     if (!string.IsNullOrWhiteSpace(idStr))
                     {
                         ids.Add(idStr);
+                        if (item.TryGetProperty("timestamp", out var tsProp))
+                        {
+                            var tsStr = tsProp.ValueKind == JsonValueKind.String
+                                ? tsProp.GetString()
+                                : (tsProp.ValueKind == JsonValueKind.Number ? tsProp.GetRawText() : null);
+                            if (!string.IsNullOrWhiteSpace(tsStr))
+                            {
+                                _likedTrackTimestamps[idStr] = tsStr;
+                            }
+                        }
                     }
                 }
             }
@@ -635,6 +661,13 @@ public sealed partial class YandexMusicService : IYandexMusicService
 
             if (apiResult?.Result != null)
             {
+                foreach (var track in apiResult.Result)
+                {
+                    if (track != null && string.IsNullOrWhiteSpace(track.AddedAt) && _likedTrackTimestamps.TryGetValue(track.Id, out var ts))
+                    {
+                        track.AddedAt = ts;
+                    }
+                }
                 allTracks.AddRange(apiResult.Result);
             }
         }
@@ -2011,6 +2044,14 @@ public sealed partial class YandexMusicService : IYandexMusicService
                 string.Equals(transport, "raw", StringComparison.OrdinalIgnoreCase))
             {
                 var q = new StreamAudioQuality { Codec = "mp3", BitrateInKbps = bitrate > 0 ? bitrate : 320 };
+                return (streamUrl, q);
+            }
+
+            if ((string.Equals(codec, "aac", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(codec, "he-aac", StringComparison.OrdinalIgnoreCase)) &&
+                string.Equals(transport, "raw", StringComparison.OrdinalIgnoreCase))
+            {
+                var q = new StreamAudioQuality { Codec = "aac", BitrateInKbps = bitrate > 0 ? bitrate : 192 };
                 return (streamUrl, q);
             }
         }

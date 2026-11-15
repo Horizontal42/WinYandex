@@ -482,6 +482,10 @@
                     <Flyout Placement="Top" ShouldConstrainToRootBounds="True">
                         <Flyout.FlyoutPresenterStyle>
                             <Style TargetType="FlyoutPresenter">
+                                <Setter Property="Background" Value="{ThemeResource SolidBackgroundFillColorBaseBrush}" />
+                                <Setter Property="BorderBrush" Value="{ThemeResource SurfaceStrokeColorFlyoutBrush}" />
+                                <Setter Property="BorderThickness" Value="1" />
+                                <Setter Property="CornerRadius" Value="{ThemeResource OverlayCornerRadius}" />
                                 <Setter Property="MinWidth" Value="380" />
                                 <Setter Property="MaxWidth" Value="420" />
                                 <Setter Property="MaxHeight" Value="520" />

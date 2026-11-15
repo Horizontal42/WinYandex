@@ -510,9 +510,19 @@ public static class TrackMenuHelper
             AddDetailRow(GetLoc("TrackDetails_Artist", isEn ? "Artist:" : "Исполнитель:"), track.ArtistNames);
             AddDetailRow(GetLoc("TrackDetails_Album", isEn ? "Album:" : "Альбом:"), albumInfo);
             AddDetailRow(GetLoc("TrackDetails_Duration", isEn ? "Duration:" : "Длительность:"), track.FormattedDuration);
-            if (!string.IsNullOrWhiteSpace(track.FormattedAddedAt))
+            string? addedAt = track.FormattedAddedAt;
+            if (string.IsNullOrWhiteSpace(addedAt))
             {
-                AddDetailRow(GetLoc("TrackDetails_AddedAt", isEn ? "Date Added:" : "Дата добавления:"), track.FormattedAddedAt);
+                var musicSvc = App.GetService<IYandexMusicService>();
+                var rawTs = musicSvc?.GetTrackAddedAt(track.Id);
+                if (!string.IsNullOrWhiteSpace(rawTs))
+                {
+                    addedAt = DateTimeOffset.TryParse(rawTs, out var dto) ? dto.ToLocalTime().ToString("g") : rawTs;
+                }
+            }
+            if (!string.IsNullOrWhiteSpace(addedAt))
+            {
+                AddDetailRow(GetLoc("TrackDetails_AddedAt", isEn ? "Date Added:" : "Дата добавления:"), addedAt);
             }
             AddDetailRow(GetLoc("TrackDetails_TrackId", isEn ? "Track ID:" : "ID трека:"), track.Id);
 
