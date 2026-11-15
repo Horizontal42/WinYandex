@@ -1048,6 +1048,11 @@ public sealed class AudioPlayerService : IAudioPlayerService
                     {
                         try { _currentInputNode.RemoveOutgoingConnection(_deviceOutput); } catch { }
                     }
+                    if (_frameOutputNode != null)
+                    {
+                        try { _currentInputNode.RemoveOutgoingConnection(_frameOutputNode); } catch { }
+                    }
+                    _isAnalyzingCurrentTrack = false;
                     _currentInputNode.MediaSourceCompleted -= OnInputNodeMediaCompleted;
                     _currentInputNode.Dispose();
                     _currentInputNode = null;
@@ -1312,11 +1317,29 @@ public sealed class AudioPlayerService : IAudioPlayerService
                         {
                             _currentInputNode.Stop();
                             _currentInputNode.RemoveOutgoingConnection(_deviceOutput);
+                            if (_frameOutputNode != null)
+                            {
+                                try { _currentInputNode.RemoveOutgoingConnection(_frameOutputNode); } catch { }
+                            }
+                            _currentInputNode.MediaSourceCompleted -= OnInputNodeMediaCompleted;
                             _currentInputNode.Dispose();
                         }
 
                         _currentInputNode = inputResult.Node;
+                        double? measuredLufs = null;
+                        if (_currentTrack != null && _measuredLoudnessCache.TryGetValue(_currentTrack.CleanId, out var cached))
+                        {
+                            measuredLufs = cached.Lufs;
+                        }
+                        double normGain = _settingsService.LoudnessNormalizationEnabled
+                            ? (_currentTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs, measuredLufs) ?? 1.0)
+                            : 1.0;
+                        _currentInputNode.OutgoingGain = normGain;
                         _currentInputNode.AddOutgoingConnection(_deviceOutput);
+                        if (_frameOutputNode != null)
+                        {
+                            try { _currentInputNode.AddOutgoingConnection(_frameOutputNode); } catch { }
+                        }
                         _currentInputNode.MediaSourceCompleted += OnInputNodeMediaCompleted;
                         _currentInputNode.Seek(currentPos);
                         if (wasPlaying)
@@ -1501,7 +1524,12 @@ public sealed class AudioPlayerService : IAudioPlayerService
         {
             try
             {
-                double normGain = _settingsService.LoudnessNormalizationEnabled ? (_currentTrack?.CalculateNormalizationGain() ?? 1.0) : 1.0;
+                double? measured = null;
+                if (_currentTrack != null && _measuredLoudnessCache.TryGetValue(_currentTrack.CleanId, out var cached))
+                {
+                    measured = cached.Lufs;
+                }
+                double normGain = _settingsService.LoudnessNormalizationEnabled ? (_currentTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs, measured) ?? 1.0) : 1.0;
                 _currentInputNode.OutgoingGain = normGain;
             }
             catch { }
@@ -1819,6 +1847,11 @@ public sealed class AudioPlayerService : IAudioPlayerService
                     {
                         try { _currentInputNode.RemoveOutgoingConnection(_deviceOutput); } catch { }
                     }
+                    if (_frameOutputNode != null)
+                    {
+                        try { _currentInputNode.RemoveOutgoingConnection(_frameOutputNode); } catch { }
+                    }
+                    _isAnalyzingCurrentTrack = false;
                     _currentInputNode.MediaSourceCompleted -= OnInputNodeMediaCompleted;
                     _currentInputNode.Dispose();
                 }
@@ -2021,6 +2054,16 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     private void OnInputNodeMediaCompleted(MediaSourceAudioInputNode sender, object args)
     {
+        if (_isAnalyzingCurrentTrack && _accumulatedSampleCount > 10000)
+        {
+            _isAnalyzingCurrentTrack = false;
+            var trackToAnalyze = _currentTrack;
+            double sumSquares = _accumulatedSumSquares;
+            long sampleCount = _accumulatedSampleCount;
+            float measuredPeak = _measuredPeak;
+            _ = Task.Run(() => FinishDynamicAnalysis(trackToAnalyze, sumSquares, sampleCount, measuredPeak));
+        }
+
         if (_isCrossfading)
         {
             return;
@@ -2352,7 +2395,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     private void OnAudioGraphQuantumStarted(AudioGraph sender, object args)
     {
-        if (!_isAnalyzingCurrentTrack || _frameOutputNode == null || _currentTrack == null) return;
+        if (!_isPlaying || !_isAnalyzingCurrentTrack || _frameOutputNode == null || _currentTrack == null) return;
 
         try
         {
@@ -2387,27 +2430,31 @@ public sealed class AudioPlayerService : IAudioPlayerService
                 if (_accumulatedSampleCount >= 220000)
                 {
                     _isAnalyzingCurrentTrack = false;
-                    _ = Task.Run(() => FinishDynamicAnalysis());
+                    var trackToAnalyze = _currentTrack;
+                    double sumSquares = _accumulatedSumSquares;
+                    long totalSampleCount = _accumulatedSampleCount;
+                    float measuredPeak = _measuredPeak;
+                    _ = Task.Run(() => FinishDynamicAnalysis(trackToAnalyze, sumSquares, totalSampleCount, measuredPeak));
                 }
             }
         }
         catch { }
     }
 
-    private void FinishDynamicAnalysis()
+    private void FinishDynamicAnalysis(Track? track, double sumSquares, long sampleCount, float measuredPeak)
     {
         try
         {
-            if (_accumulatedSampleCount == 0 || _currentTrack == null) return;
+            if (sampleCount == 0 || track == null) return;
 
-            double rms = Math.Sqrt(_accumulatedSumSquares / _accumulatedSampleCount);
+            double rms = Math.Sqrt(sumSquares / sampleCount);
             // Convert RMS to LUFS approximation (ITU-R BS.1770 unweighted approx: 20*log10(rms) - 0.69)
             double lufs = rms > 0.000001 ? (20.0 * Math.Log10(rms) - 0.691) : -30.0;
             lufs = Math.Clamp(lufs, -40.0, -2.0);
 
-            double peakDb = _measuredPeak > 0.000001 ? (20.0 * Math.Log10(_measuredPeak)) : -60.0;
+            double peakDb = measuredPeak > 0.000001 ? (20.0 * Math.Log10(measuredPeak)) : -60.0;
 
-            string cleanId = _currentTrack.CleanId;
+            string cleanId = track.CleanId;
             if (!string.IsNullOrEmpty(cleanId))
             {
                 _measuredLoudnessCache[cleanId] = (lufs, peakDb);
@@ -2415,10 +2462,14 @@ public sealed class AudioPlayerService : IAudioPlayerService
                 LogDebug($"[Normalization] Dynamic measurement finished for {cleanId}: LUFS={lufs:F2}, Peak={peakDb:F2} dBTP");
             }
 
-            if (_settingsService.LoudnessNormalizationEnabled && (_currentTrack.R128 == null || _currentTrack.R128.IntegratedLoudnessLufs == 0.0))
+            // Only apply gain if the track currently playing is still the one analyzed!
+            if (_settingsService.LoudnessNormalizationEnabled && _currentTrack != null && Track.IsSameTrackId(_currentTrack.Id, track.Id))
             {
-                double targetGain = _currentTrack.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs, lufs);
-                _ = SmoothTransitionGainAsync(targetGain);
+                if (track.R128 == null || track.R128.IntegratedLoudnessLufs == 0.0)
+                {
+                    double targetGain = track.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs, lufs);
+                    _ = SmoothTransitionGainAsync(targetGain);
+                }
             }
         }
         catch { }
@@ -2428,22 +2479,23 @@ public sealed class AudioPlayerService : IAudioPlayerService
     {
         try
         {
-            if (_currentInputNode == null || _isCrossfading) return;
-            double startGain = _currentInputNode.OutgoingGain;
+            var node = _currentInputNode;
+            if (node == null || _isCrossfading) return;
+            double startGain = node.OutgoingGain;
             if (Math.Abs(startGain - targetGain) < 0.02) return;
 
             int steps = 10;
             int delayMs = 25; // 250ms total smooth transition
             for (int i = 1; i <= steps; i++)
             {
-                if (_currentInputNode == null || _isCrossfading) break;
+                if (_currentInputNode != node || _isCrossfading) break;
                 double t = (double)i / steps;
-                _currentInputNode.OutgoingGain = startGain + (targetGain - startGain) * t;
+                node.OutgoingGain = startGain + (targetGain - startGain) * t;
                 await Task.Delay(delayMs).ConfigureAwait(false);
             }
-            if (_currentInputNode != null && !_isCrossfading)
+            if (_currentInputNode == node && !_isCrossfading)
             {
-                _currentInputNode.OutgoingGain = targetGain;
+                node.OutgoingGain = targetGain;
             }
             LogDebug($"[Normalization] Transitioned dynamically to {targetGain:F3}");
         }
