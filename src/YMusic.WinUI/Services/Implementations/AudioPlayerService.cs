@@ -249,7 +249,47 @@ public sealed class AudioPlayerService : IAudioPlayerService
         {
             AudioCategory = MediaPlayerAudioCategory.Media
         };
-        _mediaPlayer.CommandManager.IsEnabled = false;
+        _mediaPlayer.CommandManager.IsEnabled = true;
+
+        _mediaPlayer.CommandManager.PlayReceived += (cmd, args) =>
+        {
+            var deferral = args.GetDeferral();
+            args.Handled = true;
+            Play();
+            deferral.Complete();
+        };
+        _mediaPlayer.CommandManager.PauseReceived += (cmd, args) =>
+        {
+            var deferral = args.GetDeferral();
+            args.Handled = true;
+            Pause();
+            deferral.Complete();
+        };
+        _mediaPlayer.CommandManager.NextReceived += (cmd, args) =>
+        {
+            var deferral = args.GetDeferral();
+            args.Handled = true;
+            if (CheckNavDebounce())
+            {
+                _ = NextAsync();
+            }
+            deferral.Complete();
+        };
+        _mediaPlayer.CommandManager.PreviousReceived += (cmd, args) =>
+        {
+            var deferral = args.GetDeferral();
+            args.Handled = true;
+            if (CheckNavDebounce())
+            {
+                _ = PreviousAsync();
+            }
+            deferral.Complete();
+        };
+
+        _mediaPlayer.CommandManager.PlayBehavior.EnablingRule = MediaCommandEnablingRule.Always;
+        _mediaPlayer.CommandManager.PauseBehavior.EnablingRule = MediaCommandEnablingRule.Always;
+        _mediaPlayer.CommandManager.NextBehavior.EnablingRule = MediaCommandEnablingRule.Always;
+        _mediaPlayer.CommandManager.PreviousBehavior.EnablingRule = MediaCommandEnablingRule.Always;
 
         _mediaPlayer.PlaybackSession.PlaybackStateChanged += OnPlaybackStateChanged;
         _mediaPlayer.PlaybackSession.NaturalDurationChanged += OnNaturalDurationChanged;
@@ -264,7 +304,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
         _smtc.IsPauseEnabled = true;
         _smtc.IsNextEnabled = true;
         _smtc.IsPreviousEnabled = true;
-        _smtc.ButtonPressed += OnSmtcButtonPressed;
 
         _positionTimer = new System.Timers.Timer(250);
         _positionTimer.Elapsed += (_, _) =>
@@ -746,6 +785,8 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     public void TogglePlayPause()
     {
+        if (!CheckPlayPauseDebounce()) return;
+
         if (_isPlaying)
         {
             Pause();
@@ -1667,6 +1708,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
         try
         {
             _smtc.DisplayUpdater.Type = MediaPlaybackType.Music;
+            _smtc.DisplayUpdater.AppMediaId = "WinYandex";
             _smtc.DisplayUpdater.MusicProperties.Title = track.FullTitle;
             _smtc.DisplayUpdater.MusicProperties.Artist = track.ArtistNames;
             _smtc.DisplayUpdater.MusicProperties.AlbumTitle = track.AlbumTitle;
@@ -1731,6 +1773,11 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     private void OnMediaEnded(MediaPlayer sender, object args)
     {
+        if (_audioGraph != null && _currentInputNode != null)
+        {
+            return;
+        }
+
         if (_repeatMode == RepeatMode.One)
         {
             Seek(TimeSpan.Zero);
@@ -1741,25 +1788,40 @@ public sealed class AudioPlayerService : IAudioPlayerService
         _ = NextAsync();
     }
 
-    private void OnSmtcButtonPressed(SystemMediaTransportControls sender, SystemMediaTransportControlsButtonPressedEventArgs args)
+    private long _lastNavTicks;
+    private readonly object _navDebounceLock = new();
+    private bool CheckNavDebounce(int thresholdMs = 350)
     {
-        switch (args.Button)
+        lock (_navDebounceLock)
         {
-            case SystemMediaTransportControlsButton.Play:
-                Play();
-                break;
-            case SystemMediaTransportControlsButton.Pause:
-            case SystemMediaTransportControlsButton.Stop:
-                Pause();
-                break;
-            case SystemMediaTransportControlsButton.Next:
-                _ = NextAsync();
-                break;
-            case SystemMediaTransportControlsButton.Previous:
-                _ = PreviousAsync();
-                break;
+            long now = Environment.TickCount64;
+            long diff = now - _lastNavTicks;
+            if (diff < thresholdMs)
+            {
+                return false;
+            }
+            _lastNavTicks = now;
+            return true;
         }
     }
+
+    private long _lastPlayPauseTicks;
+    private readonly object _playPauseDebounceLock = new();
+    private bool CheckPlayPauseDebounce(int thresholdMs = 300)
+    {
+        lock (_playPauseDebounceLock)
+        {
+            long now = Environment.TickCount64;
+            if (now - _lastPlayPauseTicks < thresholdMs)
+            {
+                return false;
+            }
+            _lastPlayPauseTicks = now;
+            return true;
+        }
+    }
+
+
 
     private void RebuildPlayOrder()
     {
@@ -1842,7 +1904,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
         _deviceOutput?.Dispose();
         _audioGraph?.Dispose();
 
-        _smtc.ButtonPressed -= OnSmtcButtonPressed;
         _mediaPlayer.PlaybackSession.PlaybackStateChanged -= OnPlaybackStateChanged;
         _mediaPlayer.PlaybackSession.NaturalDurationChanged -= OnNaturalDurationChanged;
         _mediaPlayer.MediaEnded -= OnMediaEnded;
