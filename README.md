@@ -126,6 +126,7 @@ powershell -ExecutionPolicy Bypass -File scripts/package_release.ps1
 
 Special thanks to the contributors who help make WinYandex better and more secure:
 * [@psyattack](https://github.com/psyattack) — security audit, Windows DPAPI OAuth token encryption, and SHA-256 update integrity verification ([#1](https://github.com/pixiemays/WinYandex/pull/1)).
+* [@Horizontal42](https://github.com/Horizontal42) — hardware media keys routing consolidation and AudioGraph playback guards ([#2](https://github.com/pixiemays/WinYandex/pull/2)).
 
 ---
 

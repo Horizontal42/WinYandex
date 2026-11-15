@@ -17,6 +17,9 @@ public static class Program
 {
     private const string InstanceKey = "YMusic_WinUI_SingleInstance_AppKey";
 
+    [DllImport("shell32.dll", SetLastError = true)]
+    private static extern int SetCurrentProcessExplicitAppUserModelID([MarshalAs(UnmanagedType.LPWStr)] string AppID);
+
     [DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int dwProcessId);
 
@@ -25,6 +28,12 @@ public static class Program
     [STAThread]
     static void Main(string[] args)
     {
+        try
+        {
+            SetCurrentProcessExplicitAppUserModelID("WinYandex");
+        }
+        catch { }
+
         WinRT.ComWrappersSupport.InitializeComWrappers();
 
         bool isRedirect = DecideRedirection();

@@ -363,7 +363,10 @@ public sealed class AudioPlayerService : IAudioPlayerService
             var deferral = args.GetDeferral();
             args.Handled = true;
             LogDebug("CommandManager.NextReceived");
-            _ = NextAsync();
+            if (CheckNavDebounce())
+            {
+                _ = NextAsync();
+            }
             deferral.Complete();
         };
         _mediaPlayer.CommandManager.PreviousReceived += (cmd, args) =>
@@ -371,7 +374,10 @@ public sealed class AudioPlayerService : IAudioPlayerService
             var deferral = args.GetDeferral();
             args.Handled = true;
             LogDebug("CommandManager.PreviousReceived");
-            _ = PreviousAsync();
+            if (CheckNavDebounce())
+            {
+                _ = PreviousAsync();
+            }
             deferral.Complete();
         };
 
@@ -2084,6 +2090,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
         try
         {
             _smtc.DisplayUpdater.Type = MediaPlaybackType.Music;
+            _smtc.DisplayUpdater.AppMediaId = "WinYandex";
             _smtc.DisplayUpdater.MusicProperties.Title = track.FullTitle;
             _smtc.DisplayUpdater.MusicProperties.Artist = track.ArtistNames;
             _smtc.DisplayUpdater.MusicProperties.AlbumTitle = track.AlbumTitle;
@@ -2238,7 +2245,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
             return true;
         }
     }
-
     private long _lastPlayPauseTicks;
     private readonly object _playPauseDebounceLock = new();
     private bool CheckPlayPauseDebounce(int thresholdMs = 300)
