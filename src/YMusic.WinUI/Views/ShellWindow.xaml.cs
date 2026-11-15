@@ -748,44 +748,72 @@ public sealed partial class ShellWindow : Window
 
     public async Task NavigateToArtistAsync(Artist artist)
     {
-        App.GetService<PlayerBarViewModel>().IsNowPlayingDrawerOpen = false;
-
-        var artistVm = App.GetService<ArtistViewModel>();
-        string? currentTag = CurrentPageTag;
-        if (!string.IsNullOrEmpty(currentTag))
+        try
         {
-            artistVm.PreviousPageTag = currentTag;
-        }
+            App.GetService<PlayerBarViewModel>().IsNowPlayingDrawerOpen = false;
 
-        NavView.SelectedItem = null;
-        if (ContentFrame.CurrentSourcePageType != typeof(ArtistPage))
+            var artistVm = App.GetService<ArtistViewModel>();
+            string? currentTag = CurrentPageTag;
+            if (!string.IsNullOrEmpty(currentTag))
+            {
+                artistVm.PreviousPageTag = currentTag;
+            }
+
+            NavView.SelectedItem = null;
+            if (ContentFrame.CurrentSourcePageType != typeof(ArtistPage))
+            {
+                ContentFrame.Navigate(typeof(ArtistPage), null, new EntranceNavigationTransitionInfo());
+            }
+            (ContentFrame.Content as ArtistPage)?.ResetScroll();
+
+            await artistVm.LoadArtistAsync(artist);
+        }
+        catch (Exception ex)
         {
-            ContentFrame.Navigate(typeof(ArtistPage), null, new EntranceNavigationTransitionInfo());
+            System.Diagnostics.Debug.WriteLine($"[NavigateToArtistAsync Error] {ex}");
+            try
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string dir = System.IO.Path.Combine(appData, "YMusic");
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "app_debug.log"), $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [NavigateToArtistAsync Error]: {ex}\n");
+            }
+            catch { }
         }
-        (ContentFrame.Content as ArtistPage)?.ResetScroll();
-
-        await artistVm.LoadArtistAsync(artist);
     }
 
     public async Task NavigateToArtistByIdAsync(long artistId, string? artistName = null)
     {
-        App.GetService<PlayerBarViewModel>().IsNowPlayingDrawerOpen = false;
-
-        var artistVm = App.GetService<ArtistViewModel>();
-        string? currentTag = CurrentPageTag;
-        if (!string.IsNullOrEmpty(currentTag))
+        try
         {
-            artistVm.PreviousPageTag = currentTag;
-        }
+            App.GetService<PlayerBarViewModel>().IsNowPlayingDrawerOpen = false;
 
-        NavView.SelectedItem = null;
-        if (ContentFrame.CurrentSourcePageType != typeof(ArtistPage))
+            var artistVm = App.GetService<ArtistViewModel>();
+            string? currentTag = CurrentPageTag;
+            if (!string.IsNullOrEmpty(currentTag))
+            {
+                artistVm.PreviousPageTag = currentTag;
+            }
+
+            NavView.SelectedItem = null;
+            if (ContentFrame.CurrentSourcePageType != typeof(ArtistPage))
+            {
+                ContentFrame.Navigate(typeof(ArtistPage), null, new EntranceNavigationTransitionInfo());
+            }
+            (ContentFrame.Content as ArtistPage)?.ResetScroll();
+
+            await artistVm.LoadArtistByIdAsync(artistId, artistName);
+        }
+        catch (Exception ex)
         {
-            ContentFrame.Navigate(typeof(ArtistPage), null, new EntranceNavigationTransitionInfo());
+            System.Diagnostics.Debug.WriteLine($"[NavigateToArtistByIdAsync Error] {ex}");
+            try
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string dir = System.IO.Path.Combine(appData, "YMusic");
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "app_debug.log"), $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [NavigateToArtistByIdAsync Error]: {ex}\n");
+            }
+            catch { }
         }
-        (ContentFrame.Content as ArtistPage)?.ResetScroll();
-
-        await artistVm.LoadArtistByIdAsync(artistId, artistName);
     }
 
     public void SelectPlaylistsTab()

@@ -147,7 +147,7 @@
                             Visibility="{x:Bind ViewModel.HasCollectionTracks, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
                     <Grid>
                         <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                            <FontIcon Glyph="&#xEB52;" FontSize="18" Foreground="{ThemeResource SystemAccentColor}" />
+                            <FontIcon Glyph="&#xEB52;" FontSize="18" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
                             <TextBlock Text="{x:Bind ViewModel.CollectionTracksTitle, Mode=OneWay}"
                                        FontSize="20"
                                        FontWeight="Bold" />
@@ -318,7 +318,7 @@
                             Visibility="{x:Bind ViewModel.HasWaveTracks, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}">
                     <Grid>
                         <StackPanel Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
-                            <FontIcon Glyph="&#xE93E;" FontSize="18" Foreground="{ThemeResource SystemAccentColor}" />
+                            <FontIcon Glyph="&#xE93E;" FontSize="18" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
                             <TextBlock Text="{x:Bind ViewModel.WaveTracksTitle, Mode=OneWay}"
                                        FontSize="20"
                                        FontWeight="Bold" />

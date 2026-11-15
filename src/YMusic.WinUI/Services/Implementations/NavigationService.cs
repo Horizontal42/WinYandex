@@ -233,9 +233,16 @@ public sealed class NavigationService : INavigationService
         {
             try
             {
-                _ = _shellWindow.NavigateToArtistAsync(artist).ContinueWith(_ =>
+                _ = _shellWindow.NavigateToArtistAsync(artist).ContinueWith(t =>
                 {
-                    tcs.TrySetResult();
+                    if (t.IsFaulted && t.Exception != null)
+                    {
+                        tcs.TrySetException(t.Exception);
+                    }
+                    else
+                    {
+                        tcs.TrySetResult();
+                    }
                 });
             }
             catch (Exception ex)
@@ -267,9 +274,16 @@ public sealed class NavigationService : INavigationService
         {
             try
             {
-                _ = _shellWindow.NavigateToArtistByIdAsync(artistId, artistName).ContinueWith(_ =>
+                _ = _shellWindow.NavigateToArtistByIdAsync(artistId, artistName).ContinueWith(t =>
                 {
-                    tcs.TrySetResult();
+                    if (t.IsFaulted && t.Exception != null)
+                    {
+                        tcs.TrySetException(t.Exception);
+                    }
+                    else
+                    {
+                        tcs.TrySetResult();
+                    }
                 });
             }
             catch (Exception ex)
