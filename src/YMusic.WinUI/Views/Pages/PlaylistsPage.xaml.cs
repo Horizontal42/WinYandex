@@ -559,6 +559,26 @@ public sealed partial class PlaylistsPage : Page
         TracksListView?.ScrollToTop();
     }
 
+    public void HighlightTrack(string trackId)
+    {
+        if (string.IsNullOrWhiteSpace(trackId)) return;
+        DispatcherQueue.TryEnqueue(async () =>
+        {
+            for (int retry = 0; retry < 6; retry++)
+            {
+                var target = ViewModel.SelectedPlaylistTracks.FirstOrDefault(t => Track.IsSameTrackId(t.Id, trackId));
+                if (target != null)
+                {
+                    TracksListView?.ScrollIntoView(target);
+                    target.IsHighlighted = true;
+                    _ = Task.Delay(2500).ContinueWith(_ => DispatcherQueue.TryEnqueue(() => target.IsHighlighted = false));
+                    return;
+                }
+                await Task.Delay(120);
+            }
+        });
+    }
+
     private async void TrackAlbum_Click(object sender, RoutedEventArgs e)
     {
         if (sender is HyperlinkButton button && button.Tag is Track track)
@@ -566,14 +586,14 @@ public sealed partial class PlaylistsPage : Page
             var album = track.Albums?.FirstOrDefault();
             if (album != null && album.Id > 0)
             {
-                await App.GetService<YMusic.WinUI.Services.Interfaces.INavigationService>().NavigateToAlbumAsync(album);
+                await App.GetService<YMusic.WinUI.Services.Interfaces.INavigationService>().NavigateToAlbumAsync(album, false, track.Id);
             }
             else if (!string.IsNullOrEmpty(track.Id) && track.Id.Contains(':'))
             {
                 var parts = track.Id.Split(':');
                 if (parts.Length > 1 && long.TryParse(parts[1], out long albumId) && albumId > 0)
                 {
-                    await App.GetService<YMusic.WinUI.Services.Interfaces.INavigationService>().NavigateToAlbumByIdAsync(albumId, track.AlbumTitle);
+                    await App.GetService<YMusic.WinUI.Services.Interfaces.INavigationService>().NavigateToAlbumByIdAsync(albumId, track.AlbumTitle, track.Id);
                 }
             }
         }

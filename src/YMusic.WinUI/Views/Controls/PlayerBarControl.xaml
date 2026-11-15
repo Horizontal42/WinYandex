@@ -488,7 +488,7 @@
                                 <Setter Property="CornerRadius" Value="{ThemeResource OverlayCornerRadius}" />
                                 <Setter Property="MinWidth" Value="380" />
                                 <Setter Property="MaxWidth" Value="420" />
-                                <Setter Property="MaxHeight" Value="520" />
+                                <Setter Property="MaxHeight" Value="600" />
                                 <Setter Property="Padding" Value="14" />
                             </Style>
                         </Flyout.FlyoutPresenterStyle>
@@ -514,6 +514,48 @@
                                         Foreground="{ThemeResource AccentFillColorDefaultBrush}"
                                         helpers:CursorHelper.UseHandCursor="True" />
                             </Grid>
+
+                            <!-- Previous (Played) Tracks Section -->
+                            <StackPanel Visibility="{x:Bind ViewModel.HasPlayedTracks, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+                                        Spacing="6">
+                                <TextBlock Text="{x:Bind ViewModel.PlayedTracksLabelText, Mode=OneWay}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                <ListView ItemsSource="{x:Bind ViewModel.PlayedTracks, Mode=OneWay}"
+                                          SelectionMode="None"
+                                          IsItemClickEnabled="True"
+                                          ItemClick="PlayedQueueListView_ItemClick"
+                                          MaxHeight="120">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate x:DataType="models:Track">
+                                            <Grid Margin="0,3" ColumnSpacing="10" Opacity="0.75">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="28" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <Border Width="28" Height="28" CornerRadius="4" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
+                                                    <Image Source="{x:Bind CoverUrl, Converter={StaticResource StringToImageSourceConverter}}"
+                                                           Stretch="UniformToFill" />
+                                                </Border>
+                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                    <TextBlock Text="{x:Bind FullTitle}"
+                                                               FontSize="12"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               MaxLines="1" />
+                                                    <TextBlock Text="{x:Bind ArtistNames}"
+                                                               FontSize="10"
+                                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                               TextTrimming="CharacterEllipsis"
+                                                               MaxLines="1" />
+                                                </StackPanel>
+                                                <FontIcon Grid.Column="2" Glyph="&#xE768;" FontSize="11" Foreground="{ThemeResource TextFillColorTertiaryBrush}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                            </Grid>
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </StackPanel>
 
                             <!-- Currently Playing Mini Card -->
                             <Border Visibility="{x:Bind ViewModel.HasTrack, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -550,6 +592,13 @@
                                 </Grid>
                             </Border>
 
+                            <!-- Up Next Section Header -->
+                            <TextBlock Text="{x:Bind ViewModel.UpNextLabelText, Mode=OneWay}"
+                                       FontSize="11"
+                                       FontWeight="SemiBold"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       Visibility="{x:Bind ViewModel.HasUpNextTracks, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}" />
+
                             <!-- Queue List or Empty Message -->
                             <TextBlock Text="{x:Bind ViewModel.QueueEmptyText, Mode=OneWay}"
                                        HorizontalAlignment="Center"
@@ -558,12 +607,18 @@
                                        Margin="0,12,0,12"
                                        Visibility="{x:Bind ViewModel.HasUpNextTracks, Mode=OneWay, Converter={StaticResource InvertedBoolToVisibilityConverter}}" />
 
-                            <ListView ItemsSource="{x:Bind ViewModel.UpNextTracks, Mode=OneWay}"
+                            <ListView x:Name="UpNextQueueListView"
+                                      ItemsSource="{x:Bind ViewModel.UpNextTracks, Mode=OneWay}"
                                       Visibility="{x:Bind ViewModel.HasUpNextTracks, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
                                       SelectionMode="None"
                                       IsItemClickEnabled="True"
                                       ItemClick="QueueListView_ItemClick"
-                                      MaxHeight="320">
+                                      CanReorderItems="True"
+                                      CanDragItems="True"
+                                      AllowDrop="True"
+                                      DragItemsStarting="UpNextQueueListView_DragItemsStarting"
+                                      DragItemsCompleted="UpNextQueueListView_DragItemsCompleted"
+                                      MaxHeight="260">
                                 <ListView.ItemTemplate>
                                     <DataTemplate x:DataType="models:Track">
                                         <Grid Margin="0,4" ColumnSpacing="10">

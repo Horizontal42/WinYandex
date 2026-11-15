@@ -10,6 +10,7 @@ public sealed partial class Track : ObservableObject
 {
     [ObservableProperty]
     [property: JsonIgnore]
+    [NotifyPropertyChangedFor(nameof(IsActiveOrHighlighted))]
     private bool _isCurrent;
 
     [ObservableProperty]
@@ -65,6 +66,14 @@ public sealed partial class Track : ObservableObject
     [ObservableProperty]
     [property: JsonIgnore]
     private bool _isCached;
+
+    [ObservableProperty]
+    [property: JsonIgnore]
+    [NotifyPropertyChangedFor(nameof(IsActiveOrHighlighted))]
+    private bool _isHighlighted;
+
+    [JsonIgnore]
+    public bool IsActiveOrHighlighted => IsCurrent || IsHighlighted;
 
     [JsonIgnore]
     public static Func<string, bool>? IsTrackReplacedChecker { get; set; }
@@ -271,6 +280,36 @@ public sealed partial class Track : ObservableObject
     [JsonPropertyName("timestamp")]
     public string? AddedAt { get; set; }
 
+    [JsonPropertyName("r128")]
+    public R128Metadata? R128 { get; set; }
+
+    [JsonPropertyName("normalization")]
+    public NormalizationMetadata? Normalization { get; set; }
+
+    public double CalculateNormalizationGain()
+    {
+        double deltaDb = 0.0;
+        if (R128 != null && R128.IntegratedLoudnessLufs != 0.0)
+        {
+            // Target -14 LUFS standard
+            deltaDb = -14.0 - R128.IntegratedLoudnessLufs;
+            if (R128.TruePeakDbTp != 0.0)
+            {
+                // Ceiling protection against digital clipping
+                double maxGainDb = -1.0 - R128.TruePeakDbTp;
+                deltaDb = Math.Min(deltaDb, maxGainDb);
+            }
+        }
+        else if (Normalization != null && Normalization.GainDb != 0.0)
+        {
+            deltaDb = Normalization.GainDb;
+        }
+
+        // Clamp between -12.0 dB (0.25x) and +6.0 dB (2.0x) to avoid extreme gain jumps
+        deltaDb = Math.Clamp(deltaDb, -12.0, 6.0);
+        return Math.Pow(10.0, deltaDb / 20.0);
+    }
+
     [JsonIgnore]
     public string? FormattedAddedAt
     {
@@ -297,5 +336,23 @@ public sealed partial class Track : ObservableObject
         string clean2 = id2.Split(':')[0];
         return string.Equals(clean1, clean2, StringComparison.OrdinalIgnoreCase);
     }
+}
+
+public sealed class R128Metadata
+{
+    [JsonPropertyName("i")]
+    public double IntegratedLoudnessLufs { get; set; } = -14.0;
+
+    [JsonPropertyName("tp")]
+    public double TruePeakDbTp { get; set; } = 0.0;
+}
+
+public sealed class NormalizationMetadata
+{
+    [JsonPropertyName("gain")]
+    public double GainDb { get; set; } = 0.0;
+
+    [JsonPropertyName("peak")]
+    public int Peak { get; set; } = 32767;
 }
 

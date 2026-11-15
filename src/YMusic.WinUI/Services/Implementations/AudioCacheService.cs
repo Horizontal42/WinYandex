@@ -445,7 +445,7 @@ public sealed class AudioCacheService : IAudioCacheService
         string sanitizedId = SanitizeFileName(trackId);
         string codec = string.IsNullOrWhiteSpace(quality?.Codec) ? "mp3" : quality.Codec.ToLowerInvariant();
         int bitrate = quality?.BitrateInKbps ?? 320;
-        string ext = codec.Contains("aac") ? ".aac" : ".mp3";
+        string ext = codec.Contains("aac") ? ".aac" : (string.Equals(codec, "flac", StringComparison.OrdinalIgnoreCase) ? ".flac" : (codec.Contains("flac") ? ".mp4" : ".mp3"));
         string targetFileName = $"{sanitizedId}_{codec}_{bitrate}{ext}";
         string targetRelativePath = Path.Combine("Audio", targetFileName);
         string targetFullPath = Path.Combine(_cacheBaseDir, targetRelativePath);

@@ -43,6 +43,7 @@ public sealed partial class ProfileViewModel : BaseViewModel
     private readonly IGameOverlayService _gameOverlayService;
     private readonly IThemeService _themeService;
     private readonly ICustomThemeService _customThemeService;
+    private readonly IPlaybackStatisticsService? _statsService;
 
     private readonly string _appDataDir;
     private readonly string _profileCachePath;
@@ -156,6 +157,37 @@ public sealed partial class ProfileViewModel : BaseViewModel
 
     [ObservableProperty]
     private int _crossfadeDurationSeconds;
+
+    [ObservableProperty]
+    private bool _isLoudnessNormalizationEnabled;
+
+    public string LoudnessNormalizationTitle => IsRussian ? "Нормализация громкости" : "Loudness Normalization";
+    public string LoudnessNormalizationDesc => IsRussian ? "Выравнивание громкости треков до стандарта -14 LUFS (EBU R128 / ReplayGain)" : "Balances track loudness to standard -14 LUFS (EBU R128 / ReplayGain)";
+
+    public string ListeningStatsTitle => IsRussian ? "Статистика прослушивания" : "Listening Statistics";
+    public string StatsTodayLabel => IsRussian ? "Сегодня" : "Today";
+    public string StatsWeekLabel => IsRussian ? "За 7 дней" : "Last 7 Days";
+    public string StatsTotalLabel => IsRussian ? "За всё время" : "All Time";
+
+    [ObservableProperty]
+    private string _statsTodayValue = "0 треков";
+
+    [ObservableProperty]
+    private string _statsTodayDuration = "0 мин";
+
+    [ObservableProperty]
+    private string _statsWeekValue = "0 треков";
+
+    [ObservableProperty]
+    private string _statsWeekDuration = "0 мин";
+
+    [ObservableProperty]
+    private string _statsTotalValue = "0 треков";
+
+    [ObservableProperty]
+    private string _statsTotalDuration = "0 мин";
+
+    public System.Collections.ObjectModel.ObservableCollection<YMusic.WinUI.Services.Interfaces.DailyListeningData> DailyActivityBars { get; } = new();
 
     [ObservableProperty]
     private bool _isGlobalHotkeysEnabled;
@@ -681,7 +713,8 @@ public sealed partial class ProfileViewModel : BaseViewModel
         IUpdateService updateService,
         IGameOverlayService gameOverlayService,
         IThemeService themeService,
-        ICustomThemeService customThemeService)
+        ICustomThemeService customThemeService,
+        IPlaybackStatisticsService? statsService = null)
     {
         _musicService = musicService;
         _credentialStorage = credentialStorage;
@@ -697,6 +730,11 @@ public sealed partial class ProfileViewModel : BaseViewModel
         _gameOverlayService = gameOverlayService;
         _themeService = themeService;
         _customThemeService = customThemeService;
+        _statsService = statsService;
+        if (_statsService != null)
+        {
+            _statsService.StatisticsUpdated += (_, _) => RefreshStats();
+        }
         _customThemeService.ThemesChanged += (s, e) => RefreshThemeOptions();
         _themeService.ThemeChanged += (_, _) => RunOnUi(UpdateCommunityThemesState);
 
@@ -720,6 +758,7 @@ public sealed partial class ProfileViewModel : BaseViewModel
         _equalizerService.EqualizerChanged += OnEqualizerServiceChanged;
         _audioCacheService.CacheUpdated += (_, _) => RunOnUi(CalculateCacheSize);
         _ = LoadCommunityThemesAsync();
+        RefreshStats();
     }
 
     public async Task InitializeAsync()
@@ -773,6 +812,7 @@ public sealed partial class ProfileViewModel : BaseViewModel
             IsAutoBypassProxyEnabled = _settingsService.AutoBypassProxyForYandex;
             IsCrossfadeEnabled = _settingsService.CrossfadeEnabled;
             CrossfadeDurationSeconds = _settingsService.CrossfadeDurationSeconds;
+            IsLoudnessNormalizationEnabled = _settingsService.LoudnessNormalizationEnabled;
             IsGlobalHotkeysEnabled = _settingsService.GlobalHotkeysEnabled;
             IsGameOverlayEnabled = _settingsService.GameOverlayEnabled;
             IsShowOverlayOnTrackChangeEnabled = _settingsService.ShowOverlayOnTrackChange;
@@ -917,6 +957,10 @@ public sealed partial class ProfileViewModel : BaseViewModel
             {
                 CrossfadeDurationSeconds = _settingsService.CrossfadeDurationSeconds;
                 OnPropertyChanged(nameof(CrossfadeDurationText));
+            }
+            else if (propName == nameof(ISettingsService.LoudnessNormalizationEnabled))
+            {
+                IsLoudnessNormalizationEnabled = _settingsService.LoudnessNormalizationEnabled;
             }
             else if (propName == nameof(ISettingsService.GlobalHotkeysEnabled))
             {
@@ -1155,6 +1199,46 @@ public sealed partial class ProfileViewModel : BaseViewModel
         if (_isInitializingSettings) return;
         _settingsService.CrossfadeDurationSeconds = value;
         OnPropertyChanged(nameof(CrossfadeDurationText));
+    }
+
+    partial void OnIsLoudnessNormalizationEnabledChanged(bool value)
+    {
+        if (_isInitializingSettings) return;
+        _settingsService.LoudnessNormalizationEnabled = value;
+    }
+
+    public void RefreshStats()
+    {
+        if (_statsService == null) return;
+        RunOnUi(() =>
+        {
+            var s = _statsService.GetSummary();
+            StatsTodayValue = $"{s.TodayTracksPlayed} {(IsRussian ? "треков" : "tracks")}";
+            StatsTodayDuration = FormatDuration(s.TodayListeningSeconds);
+
+            StatsWeekValue = $"{s.WeekTracksPlayed} {(IsRussian ? "треков" : "tracks")}";
+            StatsWeekDuration = FormatDuration(s.WeekListeningSeconds);
+
+            StatsTotalValue = $"{s.TotalTracksPlayed:N0} {(IsRussian ? "треков" : "tracks")}";
+            StatsTotalDuration = FormatDuration(s.TotalListeningSeconds);
+
+            var days = _statsService.GetLastDays(7);
+            DailyActivityBars.Clear();
+            foreach (var d in days)
+            {
+                DailyActivityBars.Add(d);
+            }
+        });
+    }
+
+    private string FormatDuration(long seconds)
+    {
+        var ts = TimeSpan.FromSeconds(seconds);
+        if (ts.TotalHours >= 1)
+        {
+            return $"{Math.Floor(ts.TotalHours)}ч {ts.Minutes}мин";
+        }
+        return $"{ts.Minutes} мин";
     }
 
     partial void OnIsGlobalHotkeysEnabledChanged(bool value)

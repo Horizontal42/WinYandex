@@ -434,12 +434,26 @@ public sealed class SettingsService : ISettingsService
         get => _settings.CrossfadeDurationSeconds;
         set
         {
-            int clamped = Math.Clamp(value, 1, 10);
+            int clamped = Math.Clamp(value, 1, 12);
             if (_settings.CrossfadeDurationSeconds != clamped)
             {
                 _settings.CrossfadeDurationSeconds = clamped;
                 Save();
                 NotifyChanged(nameof(CrossfadeDurationSeconds));
+            }
+        }
+    }
+
+    public bool LoudnessNormalizationEnabled
+    {
+        get => _settings.LoudnessNormalizationEnabled;
+        set
+        {
+            if (_settings.LoudnessNormalizationEnabled != value)
+            {
+                _settings.LoudnessNormalizationEnabled = value;
+                Save();
+                NotifyChanged(nameof(LoudnessNormalizationEnabled));
             }
         }
     }

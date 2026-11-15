@@ -36,6 +36,7 @@ public interface ISettingsService
     bool AutoBypassProxyForYandex { get; set; }
     bool CrossfadeEnabled { get; set; }
     int CrossfadeDurationSeconds { get; set; }
+    bool LoudnessNormalizationEnabled { get; set; }
 
     bool GlobalHotkeysEnabled { get; set; }
     bool GameOverlayEnabled { get; set; }

@@ -428,14 +428,14 @@ public sealed partial class ExplorePage : Page
             var album = track.Albums?.FirstOrDefault();
             if (album != null && album.Id > 0)
             {
-                await App.GetService<YMusic.WinUI.Services.Interfaces.INavigationService>().NavigateToAlbumAsync(album);
+                await App.GetService<YMusic.WinUI.Services.Interfaces.INavigationService>().NavigateToAlbumAsync(album, false, track.Id);
             }
             else if (!string.IsNullOrEmpty(track.Id) && track.Id.Contains(':'))
             {
                 var parts = track.Id.Split(':');
                 if (parts.Length > 1 && long.TryParse(parts[1], out long albumId) && albumId > 0)
                 {
-                    await App.GetService<YMusic.WinUI.Services.Interfaces.INavigationService>().NavigateToAlbumByIdAsync(albumId, track.AlbumTitle);
+                    await App.GetService<YMusic.WinUI.Services.Interfaces.INavigationService>().NavigateToAlbumByIdAsync(albumId, track.AlbumTitle, track.Id);
                 }
             }
         }

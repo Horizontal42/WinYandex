@@ -135,5 +135,59 @@ public sealed partial class PlayerBarControl : UserControl
             await ViewModel.PlayQueueTrackCommand.ExecuteAsync(track);
         }
     }
+
+    private async void PlayedQueueListView_ItemClick(object sender, ItemClickEventArgs e)
+    {
+        if (e.ClickedItem is YMusic.WinUI.Models.Track track)
+        {
+            await ViewModel.PlayPlayedTrackCommand.ExecuteAsync(track);
+        }
+    }
+
+    private int _draggedFromIndex = -1;
+
+    private void UpNextQueueListView_DragItemsStarting(object sender, DragItemsStartingEventArgs args)
+    {
+        if (args.Items?.Count > 0 && args.Items[0] is YMusic.WinUI.Models.Track movedTrack)
+        {
+            _draggedFromIndex = ViewModel.UpNextTracks.IndexOf(movedTrack);
+        }
+        else
+        {
+            _draggedFromIndex = -1;
+        }
+    }
+
+    private void UpNextQueueListView_DragItemsCompleted(ListViewBase sender, DragItemsCompletedEventArgs args)
+    {
+        if (args.Items?.Count > 0 && args.Items[0] is YMusic.WinUI.Models.Track movedTrack)
+        {
+            int newIdx = ViewModel.UpNextTracks.IndexOf(movedTrack);
+            int oldIdx = _draggedFromIndex;
+            _draggedFromIndex = -1;
+
+            if (oldIdx < 0)
+            {
+                var player = App.GetService<YMusic.WinUI.Services.Interfaces.IAudioPlayerService>();
+                var upcoming = player?.UpcomingQueue;
+                if (upcoming != null)
+                {
+                    for (int u = 0; u < upcoming.Count; u++)
+                    {
+                        if (YMusic.WinUI.Models.Track.IsSameTrackId(upcoming[u].Id, movedTrack.Id))
+                        {
+                            oldIdx = u;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            if (newIdx >= 0 && oldIdx >= 0 && oldIdx != newIdx)
+            {
+                ViewModel.ReorderUpcomingTrack(oldIdx, newIdx);
+            }
+        }
+    }
 }
 

@@ -83,16 +83,23 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
     private bool _isQueueOpen;
 
     public System.Collections.ObjectModel.ObservableCollection<Track> UpNextTracks { get; } = new();
+    public System.Collections.ObjectModel.ObservableCollection<Track> PlayedTracks { get; } = new();
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(HasUpNextTracks))]
     private int _upNextCount;
 
-    public bool HasUpNextTracks => UpNextCount > 0;
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasPlayedTracks))]
+    private int _playedTracksCount;
 
-    public string QueueHeaderText => string.Format(Loc?.CurrentLanguage == "en" ? "Play Queue ({0})" : "Очередь воспроизведения ({0})", UpNextCount);
+    public bool HasUpNextTracks => UpNextCount > 0;
+    public bool HasPlayedTracks => PlayedTracksCount > 0;
+
+    public string QueueHeaderText => string.Format(Loc?.CurrentLanguage == "en" ? "Play Queue ({0})" : "Очередь воспроизведения ({0})", UpNextCount + PlayedTracksCount + (CurrentTrack != null ? 1 : 0));
     public string ClearQueueText => Loc?.CurrentLanguage == "en" ? "Clear" : "Очистить";
-    public string UpNextLabelText => Loc?.CurrentLanguage == "en" ? "Up Next" : "Далее в очереди";
+    public string UpNextLabelText => Loc?.CurrentLanguage == "en" ? $"Up Next ({UpNextCount})" : $"Далее в очереди ({UpNextCount})";
+    public string PlayedTracksLabelText => Loc?.CurrentLanguage == "en" ? $"Previously Played ({PlayedTracksCount})" : $"Ранее играли ({PlayedTracksCount})";
     public string CurrentTrackLabelText => Loc?.CurrentLanguage == "en" ? "Now Playing" : "Сейчас играет";
     public string QueueEmptyText => Loc?.CurrentLanguage == "en" ? "Queue is empty" : "Очередь пуста";
     public string QueueDrawerTooltip => Loc?.CurrentLanguage == "en" ? "Playback Queue" : "Очередь воспроизведения";
@@ -1161,8 +1168,31 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
                 UpNextTracks.Add(t);
             }
             UpNextCount = queue.Count;
+
+            var played = _audioPlayer.PlayedQueue;
+            PlayedTracks.Clear();
+            foreach (var p in played)
+            {
+                PlayedTracks.Add(p);
+            }
+            PlayedTracksCount = played.Count;
+
             OnPropertyChanged(nameof(QueueHeaderText));
+            OnPropertyChanged(nameof(UpNextLabelText));
+            OnPropertyChanged(nameof(PlayedTracksLabelText));
         });
+    }
+
+    public void ReorderUpcomingTrack(int oldIndex, int newIndex)
+    {
+        _audioPlayer.ReorderUpcomingQueue(oldIndex, newIndex);
+    }
+
+    [RelayCommand]
+    public async Task PlayPlayedTrackAsync(Track? track)
+    {
+        if (track == null) return;
+        await _audioPlayer.PlayPlayedTrackAsync(track).ConfigureAwait(false);
     }
 
     [RelayCommand]

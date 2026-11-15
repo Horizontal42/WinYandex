@@ -343,6 +343,118 @@
                             </StackPanel>
                         </Button>
                     </Grid>
+
+                    <!-- Listening Statistics (Aria style) -->
+                    <Border Margin="0,14,0,0"
+                            Padding="18,16"
+                            CornerRadius="10"
+                            Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
+                            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                            BorderThickness="1">
+                        <StackPanel Spacing="14">
+                            <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                <FontIcon Glyph="&#xE9D2;" FontSize="15" Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                                <TextBlock Text="{x:Bind ViewModel.ListeningStatsTitle, Mode=OneWay}"
+                                           FontSize="14"
+                                           FontWeight="SemiBold" />
+                            </StackPanel>
+
+                            <!-- 3 KPI Cards -->
+                            <Grid ColumnSpacing="10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+
+                                <!-- Today -->
+                                <Border Grid.Column="0"
+                                        Padding="12,10"
+                                        CornerRadius="8"
+                                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                                    <StackPanel Spacing="3">
+                                        <TextBlock Text="{x:Bind ViewModel.StatsTodayLabel, Mode=OneWay}"
+                                                   FontSize="11"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Text="{x:Bind ViewModel.StatsTodayValue, Mode=OneWay}"
+                                                   FontSize="15"
+                                                   FontWeight="Bold" />
+                                        <TextBlock Text="{x:Bind ViewModel.StatsTodayDuration, Mode=OneWay}"
+                                                   FontSize="12"
+                                                   Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- 7 Days -->
+                                <Border Grid.Column="1"
+                                        Padding="12,10"
+                                        CornerRadius="8"
+                                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                                    <StackPanel Spacing="3">
+                                        <TextBlock Text="{x:Bind ViewModel.StatsWeekLabel, Mode=OneWay}"
+                                                   FontSize="11"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Text="{x:Bind ViewModel.StatsWeekValue, Mode=OneWay}"
+                                                   FontSize="15"
+                                                   FontWeight="Bold" />
+                                        <TextBlock Text="{x:Bind ViewModel.StatsWeekDuration, Mode=OneWay}"
+                                                   FontSize="12"
+                                                   Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- All Time -->
+                                <Border Grid.Column="2"
+                                        Padding="12,10"
+                                        CornerRadius="8"
+                                        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                                    <StackPanel Spacing="3">
+                                        <TextBlock Text="{x:Bind ViewModel.StatsTotalLabel, Mode=OneWay}"
+                                                   FontSize="11"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        <TextBlock Text="{x:Bind ViewModel.StatsTotalValue, Mode=OneWay}"
+                                                   FontSize="15"
+                                                   FontWeight="Bold" />
+                                        <TextBlock Text="{x:Bind ViewModel.StatsTotalDuration, Mode=OneWay}"
+                                                   FontSize="12"
+                                                   Foreground="{ThemeResource AccentFillColorDefaultBrush}" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+
+                            <!-- Weekly Activity Bar Chart -->
+                            <ItemsControl ItemsSource="{x:Bind ViewModel.DailyActivityBars, Mode=OneWay}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <StackPanel Orientation="Horizontal"
+                                                    HorizontalAlignment="Center"
+                                                    Spacing="10"
+                                                    VerticalAlignment="Bottom"
+                                                    Height="85" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="interfaces:DailyListeningData">
+                                        <StackPanel Spacing="6"
+                                                    HorizontalAlignment="Center"
+                                                    VerticalAlignment="Bottom"
+                                                    Width="42"
+                                                    ToolTipService.ToolTip="{x:Bind TooltipText}">
+                                            <Border Height="{x:Bind BarHeight}"
+                                                    Width="18"
+                                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                                    CornerRadius="4,4,0,0"
+                                                    VerticalAlignment="Bottom" />
+                                            <TextBlock Text="{x:Bind DayLabel}"
+                                                       FontSize="11"
+                                                       HorizontalAlignment="Center"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </Border>
 
@@ -434,6 +546,25 @@
                         </Grid>
                     </Border>
 
+                    <!-- Loudness Normalization Card -->
+                    <Border Padding="18,16" CornerRadius="10" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Spacing="4" Margin="0,0,16,0">
+                                <TextBlock Text="{x:Bind ViewModel.LoudnessNormalizationTitle, Mode=OneWay}" FontSize="14" FontWeight="SemiBold" />
+                                <TextBlock Text="{x:Bind ViewModel.LoudnessNormalizationDesc, Mode=OneWay}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ToggleSwitch Grid.Column="1"
+                                          IsOn="{x:Bind ViewModel.IsLoudnessNormalizationEnabled, Mode=TwoWay}"
+                                          OnContent="{x:Bind ViewModel.SwitchEnabledText, Mode=OneWay}"
+                                          OffContent="{x:Bind ViewModel.SwitchDisabledText, Mode=OneWay}"
+                                          VerticalAlignment="Center" />
+                        </Grid>
+                    </Border>
+
                     <!-- Smart Crossfade Card -->
                     <Border Padding="18,16" CornerRadius="10" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
                         <Grid>
@@ -460,7 +591,7 @@
                             <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Margin="0,14,0,0"
                                         Orientation="Horizontal" Spacing="16" VerticalAlignment="Center"
                                         Visibility="{x:Bind ViewModel.IsCrossfadeEnabled, Mode=OneWay}">
-                                <Slider Minimum="1" Maximum="10" StepFrequency="1"
+                                <Slider Minimum="1" Maximum="12" StepFrequency="1"
                                         Value="{x:Bind ViewModel.CrossfadeDurationSeconds, Mode=TwoWay}"
                                         Width="200" VerticalAlignment="Center" />
                                 <TextBlock Text="{x:Bind ViewModel.CrossfadeDurationText, Mode=OneWay}"

@@ -465,6 +465,38 @@ public static class TrackMenuHelper
         };
         flyout.Items.Add(downloadItem);
 
+        // 8a. Go to Artist
+        var goToArtistItem = new MenuFlyoutItem
+        {
+            Text = GetLoc("TrackMenu_GoToArtist", isEn ? "Go to artist" : "Перейти к исполнителю"),
+            Icon = new FontIcon { Glyph = "\uE77B" }
+        };
+        goToArtistItem.Click += async (s, e) =>
+        {
+            await ArtistNavigationHelper.NavigateToTrackArtistAsync(null, track);
+        };
+        flyout.Items.Add(goToArtistItem);
+
+        // 8b. Go to Album
+        var albumObj = track.Albums?.FirstOrDefault();
+        if (albumObj != null && albumObj.Id > 0)
+        {
+            var goToAlbumItem = new MenuFlyoutItem
+            {
+                Text = GetLoc("TrackMenu_GoToAlbum", isEn ? "Go to album" : "Перейти к альбому"),
+                Icon = new FontIcon { Glyph = "\uE93C" }
+            };
+            goToAlbumItem.Click += async (s, e) =>
+            {
+                var navService = App.GetService<INavigationService>();
+                if (navService != null)
+                {
+                    await navService.NavigateToAlbumAsync(albumObj, false, track.Id);
+                }
+            };
+            flyout.Items.Add(goToAlbumItem);
+        }
+
         // 9. Track Details
         var detailsItem = new MenuFlyoutItem
         {

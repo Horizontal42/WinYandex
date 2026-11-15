@@ -20,6 +20,7 @@ public interface IAudioPlayerService : IDisposable
 
     IReadOnlyList<Track> Queue { get; }
     IReadOnlyList<Track> UpcomingQueue { get; }
+    IReadOnlyList<Track> PlayedQueue { get; }
     int CurrentIndex { get; }
 
     PlaybackMode CurrentPlaybackMode { get; set; }
@@ -44,6 +45,8 @@ public interface IAudioPlayerService : IDisposable
     void PlayNext(Track track);
     void RemoveFromQueue(Track track);
     void ReplaceUpcomingQueue(IEnumerable<Track> newUpcomingTracks);
+    void ReorderUpcomingQueue(int oldIndex, int newIndex);
+    Task PlayPlayedTrackAsync(Track track);
     void Play();
     void Pause();
     void TogglePlayPause();

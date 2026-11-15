@@ -35,19 +35,23 @@ public sealed class NavigationService : INavigationService
         }
     }
 
-    public async Task NavigateToAlbumAsync(Album album, bool isFromPinned = false)
+    public async Task NavigateToAlbumAsync(Album album, bool isFromPinned = false, string? targetTrackId = null)
     {
         if (album == null || _shellWindow == null) return;
 
         var playlistsVm = App.GetService<PlaylistsViewModel>();
 
-        // If this album is already open and visible on PlaylistsPage, do nothing
+        // If this album is already open and visible on PlaylistsPage, highlight target track
         if (playlistsVm.IsDetailOpen && playlistsVm.SelectedAlbum?.Id == album.Id &&
             _shellWindow.IsPlaylistsPageActive)
         {
             if (isFromPinned)
             {
                 playlistsVm.IsBackButtonVisible = false;
+            }
+            if (!string.IsNullOrEmpty(targetTrackId))
+            {
+                _shellWindow.CurrentPlaylistsPage?.HighlightTrack(targetTrackId);
             }
             return;
         }
@@ -66,6 +70,10 @@ public sealed class NavigationService : INavigationService
                     {
                         await playlistsVm.OpenAlbumAsync(album);
                         _shellWindow.CurrentPlaylistsPage?.ResetScrollAndHeader();
+                        if (!string.IsNullOrEmpty(targetTrackId))
+                        {
+                            _shellWindow.CurrentPlaylistsPage?.HighlightTrack(targetTrackId);
+                        }
                         tcs.TrySetResult();
                     }
                     catch (Exception loadEx)
@@ -119,14 +127,14 @@ public sealed class NavigationService : INavigationService
         await tcs.Task;
     }
 
-    public async Task NavigateToAlbumByIdAsync(long albumId, string? albumTitle = null)
+    public async Task NavigateToAlbumByIdAsync(long albumId, string? albumTitle = null, string? targetTrackId = null)
     {
         var album = new Album
         {
             Id = albumId,
             Title = albumTitle ?? string.Empty
         };
-        await NavigateToAlbumAsync(album);
+        await NavigateToAlbumAsync(album, false, targetTrackId);
     }
 
     public async Task NavigateToPlaylistAsync(Playlist playlist, bool isFromPinned = false)

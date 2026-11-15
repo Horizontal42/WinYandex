@@ -63,6 +63,7 @@ public partial class App : Application
         services.AddSingleton<ISloplessService, SloplessService>();
         services.AddSingleton<ILocalizationService, LocalizationService>();
         services.AddSingleton<IAudioCacheService, AudioCacheService>();
+        services.AddSingleton<IPlaybackStatisticsService, PlaybackStatisticsService>();
         services.AddSingleton<IAudioPlayerService, AudioPlayerService>();
         services.AddSingleton<IEqualizerService, EqualizerService>();
         services.AddSingleton<ITrackPlaybackCoordinator, TrackPlaybackCoordinator>();

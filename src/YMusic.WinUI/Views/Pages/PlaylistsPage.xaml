@@ -760,7 +760,7 @@
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="models:Track">
                         <Border CornerRadius="8"
-                                Background="{x:Bind IsCurrent, Mode=OneWay, Converter={StaticResource BoolToTrackHighlightBrushConverter}}"
+                                Background="{x:Bind IsActiveOrHighlighted, Mode=OneWay, Converter={StaticResource BoolToTrackHighlightBrushConverter}}"
                                 Opacity="{x:Bind TrackOpacity, Mode=OneWay}"
                                 helpers:TrackMenuHelper.Track="{x:Bind}"
                                 Margin="0">

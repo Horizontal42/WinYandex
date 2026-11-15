@@ -22,6 +22,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
     private readonly IAudioCacheService _audioCacheService;
     private readonly ISettingsService _settingsService;
     private readonly ISloplessService _sloplessService;
+    private readonly IPlaybackStatisticsService? _statisticsService;
     private readonly MediaPlayer _mediaPlayer;
     private readonly SystemMediaTransportControls _smtc;
     private readonly System.Timers.Timer _positionTimer;
@@ -178,6 +179,25 @@ public sealed class AudioPlayerService : IAudioPlayerService
         }
     }
 
+    public IReadOnlyList<Track> PlayedQueue
+    {
+        get
+        {
+            if (_orderIndex <= 0 || _playOrder.Count == 0 || _queue.Count == 0) return Array.Empty<Track>();
+            int count = Math.Min(_orderIndex, _playOrder.Count);
+            var list = new List<Track>(count);
+            for (int i = 0; i < count; i++)
+            {
+                int trackIdx = _playOrder[i];
+                if (trackIdx >= 0 && trackIdx < _queue.Count)
+                {
+                    list.Add(_queue[trackIdx]);
+                }
+            }
+            return list.AsReadOnly();
+        }
+    }
+
     public int CurrentIndex => (_orderIndex >= 0 && _orderIndex < _playOrder.Count)
         ? _playOrder[_orderIndex]
         : -1;
@@ -224,7 +244,8 @@ public sealed class AudioPlayerService : IAudioPlayerService
         IFckCensorService fckCensorService,
         IAudioCacheService audioCacheService,
         ISettingsService settingsService,
-        ISloplessService sloplessService)
+        ISloplessService sloplessService,
+        IPlaybackStatisticsService? statisticsService = null)
     {
         _yandexMusicService = yandexMusicService;
         _equalizerService = equalizerService;
@@ -233,6 +254,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
         _audioCacheService = audioCacheService;
         _settingsService = settingsService;
         _sloplessService = sloplessService;
+        _statisticsService = statisticsService;
 
         IsPreloadingEnabled = _settingsService.GaplessPreloadEnabled;
         _settingsService.SettingChanged += async (_, prop) =>
@@ -335,6 +357,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
                 CheckCrossfade(pos);
 
                 var dur = Duration;
+                _statisticsService?.RecordProgress(_currentTrack?.Id ?? string.Empty, pos, dur, _isPlaying);
                 if (dur > TimeSpan.Zero && (_currentTrack == null || _currentTrack.DurationMs <= 0))
                 {
                     if (_currentTrack != null)
@@ -810,13 +833,62 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     public void RemoveFromQueue(Track track)
     {
-        if (track == null || _queue.Count == 0) return;
-        var upcoming = UpcomingQueue.ToList();
-        int idx = upcoming.FindIndex(t => Track.IsSameTrackId(t.Id, track.Id));
-        if (idx >= 0)
+        if (track == null || _queue.Count == 0 || _orderIndex < 0) return;
+        for (int i = _orderIndex + 1; i < _playOrder.Count; i++)
         {
-            upcoming.RemoveAt(idx);
-            ReplaceUpcomingQueue(upcoming);
+            int qIdx = _playOrder[i];
+            if (qIdx >= 0 && qIdx < _queue.Count && Track.IsSameTrackId(_queue[qIdx].Id, track.Id))
+            {
+                _playOrder.RemoveAt(i);
+                TriggerUpcomingTracksPreload();
+                RequestSaveState();
+                QueueChanged?.Invoke(this, EventArgs.Empty);
+                break;
+            }
+        }
+    }
+
+    public void ReorderUpcomingQueue(int oldIndex, int newIndex)
+    {
+        if (_orderIndex < 0 || _orderIndex >= _playOrder.Count) return;
+        int upcomingStart = _orderIndex + 1;
+        int from = upcomingStart + oldIndex;
+        int to = upcomingStart + newIndex;
+
+        if (from >= upcomingStart && from < _playOrder.Count &&
+            to >= upcomingStart && to < _playOrder.Count && from != to)
+        {
+            int moved = _playOrder[from];
+            _playOrder.RemoveAt(from);
+            _playOrder.Insert(to, moved);
+
+            TriggerUpcomingTracksPreload();
+            RequestSaveState();
+            QueueChanged?.Invoke(this, EventArgs.Empty);
+        }
+    }
+
+    public async Task PlayPlayedTrackAsync(Track track)
+    {
+        if (track == null || _orderIndex <= 0 || _playOrder.Count == 0) return;
+
+        int targetOrderIndex = -1;
+        for (int i = _orderIndex - 1; i >= 0; i--)
+        {
+            int qIdx = _playOrder[i];
+            if (qIdx >= 0 && qIdx < _queue.Count && Track.IsSameTrackId(_queue[qIdx].Id, track.Id))
+            {
+                targetOrderIndex = i;
+                break;
+            }
+        }
+
+        if (targetOrderIndex >= 0)
+        {
+            _orderIndex = targetOrderIndex;
+            var trackToPlay = _queue[_playOrder[_orderIndex]];
+            await LoadAndPlayTrackAsync(trackToPlay).ConfigureAwait(false);
+            QueueChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -1445,7 +1517,18 @@ public sealed class AudioPlayerService : IAudioPlayerService
                 return;
             }
 
-            var nextSource = Windows.Media.Core.MediaSource.CreateFromUri(new Uri(streamUrl));
+            MediaSource nextSource;
+            if (streamUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+                streamUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                nextSource = Windows.Media.Core.MediaSource.CreateFromUri(new Uri(streamUrl));
+            }
+            else
+            {
+                var storageFile = await Windows.Storage.StorageFile.GetFileFromPathAsync(streamUrl);
+                nextSource = Windows.Media.Core.MediaSource.CreateFromStorageFile(storageFile);
+            }
+
             var inputResult = await _audioGraph.CreateMediaSourceAudioInputNodeAsync(nextSource);
             if (inputResult.Status != Windows.Media.Audio.MediaSourceAudioInputNodeCreationStatus.Success || inputResult.Node == null)
             {
@@ -1471,6 +1554,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
             _fadingOutNode = oldNode;
             _currentInputNode = nextNode;
 
+            var oldTrack = _currentTrack;
             _orderIndex = nextOrderIndex;
             _currentTrack = nextTrack;
             _currentQuality = quality;
@@ -1484,6 +1568,9 @@ public sealed class AudioPlayerService : IAudioPlayerService
                 DurationChanged?.Invoke(this, nextNode.Duration);
             }
             PositionChanged?.Invoke(this, TimeSpan.Zero);
+
+            double currentNormGain = _settingsService.LoudnessNormalizationEnabled ? (oldTrack?.CalculateNormalizationGain() ?? 1.0) : 1.0;
+            double nextNormGain = _settingsService.LoudnessNormalizationEnabled ? (nextTrack?.CalculateNormalizationGain() ?? 1.0) : 1.0;
 
             int totalSteps = Math.Max(10, crossfadeSeconds * 20); // 20 updates per second (50ms)
             int stepDelayMs = (crossfadeSeconds * 1000) / totalSteps;
@@ -1500,11 +1587,11 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
                 if (_fadingOutNode != null)
                 {
-                    _fadingOutNode.OutgoingGain = gainOut;
+                    _fadingOutNode.OutgoingGain = gainOut * currentNormGain;
                 }
                 if (_currentInputNode != null)
                 {
-                    _currentInputNode.OutgoingGain = gainIn;
+                    _currentInputNode.OutgoingGain = gainIn * nextNormGain;
                 }
             }
 
@@ -1522,7 +1609,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
             if (_currentInputNode != null)
             {
-                _currentInputNode.OutgoingGain = 1.0;
+                _currentInputNode.OutgoingGain = nextNormGain;
                 _currentInputNode.MediaSourceCompleted += OnInputNodeMediaCompleted;
             }
 
@@ -1672,7 +1759,18 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
         _consecutivePlaybackFailures = 0;
 
-        var source = MediaSource.CreateFromUri(new Uri(streamUrl));
+        MediaSource source;
+        if (streamUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            streamUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            source = MediaSource.CreateFromUri(new Uri(streamUrl));
+        }
+        else
+        {
+            var storageFile = await Windows.Storage.StorageFile.GetFileFromPathAsync(streamUrl);
+            source = MediaSource.CreateFromStorageFile(storageFile);
+        }
+
         source.OpenOperationCompleted += (s, args) =>
         {
             if (s.Duration.HasValue && s.Duration.Value > TimeSpan.Zero)
@@ -1708,6 +1806,8 @@ public sealed class AudioPlayerService : IAudioPlayerService
                     }
 
                     _currentInputNode = inputResult.Node;
+                    double normGain = _settingsService.LoudnessNormalizationEnabled ? (_currentTrack?.CalculateNormalizationGain() ?? 1.0) : 1.0;
+                    _currentInputNode.OutgoingGain = normGain;
                     _currentInputNode.AddOutgoingConnection(_deviceOutput);
                     _currentInputNode.MediaSourceCompleted += OnInputNodeMediaCompleted;
 
@@ -1754,6 +1854,8 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
         if (requestId != _playRequestId) return;
 
+        double fallbackNormGain = _settingsService.LoudnessNormalizationEnabled ? (_currentTrack?.CalculateNormalizationGain() ?? 1.0) : 1.0;
+        _mediaPlayer.Volume = Math.Clamp((_volume / 100.0) * fallbackNormGain, 0.0, 1.0);
         _mediaPlayer.Source = source;
         if (startPosition.HasValue && startPosition.Value > TimeSpan.Zero)
         {
