@@ -347,35 +347,15 @@ public sealed partial class ArtistViewModel : BaseViewModel
                 }
             }
 
-            // Fetch user liked tracks to find collection tracks for this artist
-            List<Track> artistCollectionTracks = new();
-            try
-            {
-                var allLiked = await _musicService.GetLikedTracksAsync().ConfigureAwait(false);
-                string currentArtistName = briefInfo?.Artist?.Name ?? ArtistName;
-                artistCollectionTracks = allLiked
-                    .Where(t => (t.Artists != null && t.Artists.Any(a => a.Id == artistId)) ||
-                                (!string.IsNullOrWhiteSpace(currentArtistName) && t.ArtistNames.Contains(currentArtistName, StringComparison.OrdinalIgnoreCase)))
-                    .ToList();
-            }
-            catch (Exception ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"[ArtistViewModel] Collection tracks warning: {ex.Message}");
-            }
-
             RunOnUi(() =>
             {
                 PopularTracks.Clear();
                 CollectionTracks.Clear();
+                HasCollectionTracks = false;
                 AllAlbums.Clear();
                 AlsoAlbums.Clear();
                 DisplayAlbums.Clear();
 
-                foreach (var ct in artistCollectionTracks)
-                {
-                    CollectionTracks.Add(ct);
-                }
-                HasCollectionTracks = CollectionTracks.Count > 0;
                 OnPropertyChanged(nameof(CollectionTracksCountText));
 
                 if (briefInfo?.Artist != null)
@@ -497,6 +477,8 @@ public sealed partial class ArtistViewModel : BaseViewModel
 
                 FilterAlbums(0);
             });
+
+            _ = LoadCollectionTracksAsync(artistId, briefInfo?.Artist?.Name ?? ArtistName);
         }
         catch (Exception ex)
         {
@@ -506,6 +488,34 @@ public sealed partial class ArtistViewModel : BaseViewModel
         finally
         {
             SetBusy(false);
+        }
+    }
+
+    private async Task LoadCollectionTracksAsync(long artistId, string artistName)
+    {
+        try
+        {
+            var allLiked = await _musicService.GetLikedTracksAsync().ConfigureAwait(false);
+            var artistCollectionTracks = allLiked
+                .Where(t => (t.Artists != null && t.Artists.Any(a => a.Id == artistId)) ||
+                            (!string.IsNullOrWhiteSpace(artistName) && t.ArtistNames.Contains(artistName, StringComparison.OrdinalIgnoreCase)))
+                .ToList();
+
+            RunOnUi(() =>
+            {
+                if (ArtistId != artistId) return; // User already navigated to another artist
+                CollectionTracks.Clear();
+                foreach (var ct in artistCollectionTracks)
+                {
+                    CollectionTracks.Add(ct);
+                }
+                HasCollectionTracks = CollectionTracks.Count > 0;
+                OnPropertyChanged(nameof(CollectionTracksCountText));
+            });
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[ArtistViewModel] Collection tracks warning: {ex.Message}");
         }
     }
 

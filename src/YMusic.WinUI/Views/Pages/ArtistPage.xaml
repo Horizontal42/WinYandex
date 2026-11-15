@@ -295,15 +295,16 @@
                                                    HorizontalAlignment="Right" />
 
                                         <Button Grid.Column="4"
-                                                Flyout="{StaticResource TrackOptionsFlyout}"
-                                                Width="36"
-                                                Height="36"
+                                                helpers:TrackMenuHelper.OptionsButtonTrack="{x:Bind}"
+                                                Width="32"
+                                                Height="32"
                                                 Padding="0"
-                                                CornerRadius="18"
+                                                CornerRadius="16"
                                                 Background="Transparent"
                                                 BorderBrush="Transparent"
-                                                helpers:CursorHelper.UseHandCursor="True">
-                                            <FontIcon Glyph="&#xE712;" FontSize="14" />
+                                                helpers:CursorHelper.UseHandCursor="True"
+                                                ToolTipService.ToolTip="Дополнительно">
+                                            <FontIcon Glyph="&#xE712;" FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                                         </Button>
                                     </Grid>
                                 </Button>
