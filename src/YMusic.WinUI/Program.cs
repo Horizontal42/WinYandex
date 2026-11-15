@@ -70,6 +70,21 @@ public static class Program
                 .Where(p => p.Id != currentProcess.Id)
                 .ToList();
 
+            if (existingProcesses.Count == 0)
+            {
+                try
+                {
+                    AppInstance.GetCurrent().UnregisterKey();
+                    var currentInst = AppInstance.FindOrRegisterForKey(InstanceKey);
+                    if (currentInst.IsCurrent)
+                    {
+                        currentInst.Activated += OnAppActivated;
+                    }
+                }
+                catch { }
+                return false;
+            }
+
             AppActivationArguments args = AppInstance.GetCurrent().GetActivatedEventArgs();
             AppInstance mainInstance = AppInstance.FindOrRegisterForKey(InstanceKey);
 
@@ -77,21 +92,6 @@ public static class Program
             {
                 mainInstance.Activated += OnAppActivated;
                 return false;
-            }
-
-            if (existingProcesses.Count == 0)
-            {
-                try
-                {
-                    AppInstance.GetCurrent().UnregisterKey();
-                }
-                catch { }
-                mainInstance = AppInstance.FindOrRegisterForKey(InstanceKey);
-                if (mainInstance.IsCurrent)
-                {
-                    mainInstance.Activated += OnAppActivated;
-                    return false;
-                }
             }
 
             // An instance is already running. Allow foreground activation and redirect.
