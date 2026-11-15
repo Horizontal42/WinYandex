@@ -698,6 +698,105 @@ public sealed class SettingsService : ISettingsService
         }
     }
 
+    public int WindowWidth
+    {
+        get => _settings.WindowWidth;
+        set
+        {
+            if (_settings.WindowWidth != value)
+            {
+                _settings.WindowWidth = value;
+                Save();
+            }
+        }
+    }
+
+    public int WindowHeight
+    {
+        get => _settings.WindowHeight;
+        set
+        {
+            if (_settings.WindowHeight != value)
+            {
+                _settings.WindowHeight = value;
+                Save();
+            }
+        }
+    }
+
+    public int? WindowPositionX
+    {
+        get => _settings.WindowPositionX;
+        set
+        {
+            if (_settings.WindowPositionX != value)
+            {
+                _settings.WindowPositionX = value;
+                Save();
+            }
+        }
+    }
+
+    public int? WindowPositionY
+    {
+        get => _settings.WindowPositionY;
+        set
+        {
+            if (_settings.WindowPositionY != value)
+            {
+                _settings.WindowPositionY = value;
+                Save();
+            }
+        }
+    }
+
+    public bool IsWindowMaximized
+    {
+        get => _settings.IsWindowMaximized;
+        set
+        {
+            if (_settings.IsWindowMaximized != value)
+            {
+                _settings.IsWindowMaximized = value;
+                Save();
+            }
+        }
+    }
+
+    private System.Threading.Timer? _windowPlacementDebounceTimer;
+
+    public void SaveWindowPlacement(int width, int height, int? x, int? y, bool isMaximized)
+    {
+        bool changed = false;
+        if (!isMaximized && width >= 900 && height >= 600)
+        {
+            if (_settings.WindowWidth != width || _settings.WindowHeight != height)
+            {
+                _settings.WindowWidth = width;
+                _settings.WindowHeight = height;
+                changed = true;
+            }
+            if (x.HasValue && y.HasValue && (_settings.WindowPositionX != x || _settings.WindowPositionY != y))
+            {
+                _settings.WindowPositionX = x;
+                _settings.WindowPositionY = y;
+                changed = true;
+            }
+        }
+
+        if (_settings.IsWindowMaximized != isMaximized)
+        {
+            _settings.IsWindowMaximized = isMaximized;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            _windowPlacementDebounceTimer ??= new System.Threading.Timer(_ => Save(), null, Timeout.Infinite, Timeout.Infinite);
+            _windowPlacementDebounceTimer.Change(1000, Timeout.Infinite);
+        }
+    }
+
     private void Load()
     {
         lock (_lock)

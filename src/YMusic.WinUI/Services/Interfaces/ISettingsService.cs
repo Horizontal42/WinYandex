@@ -59,6 +59,13 @@ public interface ISettingsService
     bool ShowEditorialPlaylistsOnHome { get; set; }
     bool ShowChartOnHome { get; set; }
 
+    int WindowWidth { get; set; }
+    int WindowHeight { get; set; }
+    int? WindowPositionX { get; set; }
+    int? WindowPositionY { get; set; }
+    bool IsWindowMaximized { get; set; }
+    void SaveWindowPlacement(int width, int height, int? x, int? y, bool isMaximized);
+
     event EventHandler<string>? SettingChanged;
 
     void Save();
