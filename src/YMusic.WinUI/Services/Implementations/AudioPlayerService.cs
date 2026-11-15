@@ -354,7 +354,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
         {
             AudioCategory = MediaPlayerAudioCategory.Media
         };
-        _mediaPlayer.CommandManager.IsEnabled = !_settingsService.GlobalHotkeysEnabled;
+        _mediaPlayer.CommandManager.IsEnabled = true;
         _settingsService.SettingChanged += OnSettingsChanged;
 
         _loudnessCacheFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YMusic", "loudness_cache.json");
@@ -365,7 +365,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
             var deferral = args.GetDeferral();
             args.Handled = true;
             LogDebug("CommandManager.PlayReceived");
-            Play();
+            TogglePlayPause();
             deferral.Complete();
         };
         _mediaPlayer.CommandManager.PauseReceived += (cmd, args) =>
@@ -373,7 +373,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
             var deferral = args.GetDeferral();
             args.Handled = true;
             LogDebug("CommandManager.PauseReceived");
-            Pause();
+            TogglePlayPause();
             deferral.Complete();
         };
         _mediaPlayer.CommandManager.NextReceived += (cmd, args) =>
@@ -381,10 +381,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
             var deferral = args.GetDeferral();
             args.Handled = true;
             LogDebug("CommandManager.NextReceived");
-            if (CheckNavDebounce())
-            {
-                _ = NextAsync();
-            }
+            _ = NextAsync();
             deferral.Complete();
         };
         _mediaPlayer.CommandManager.PreviousReceived += (cmd, args) =>
@@ -392,10 +389,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
             var deferral = args.GetDeferral();
             args.Handled = true;
             LogDebug("CommandManager.PreviousReceived");
-            if (CheckNavDebounce())
-            {
-                _ = PreviousAsync();
-            }
+            _ = PreviousAsync();
             deferral.Complete();
         };
 
@@ -1222,36 +1216,59 @@ public sealed class AudioPlayerService : IAudioPlayerService
         LogDebug("NextAsync passed debounce -> advancing track");
 
         CancelActiveCrossfade();
-        if (_queue.Count == 0 || _playOrder.Count == 0)
+
+        Track? trackToPlay = null;
+        bool shouldAutoplayWave = false;
+        lock (_queueLock)
         {
+            if (_queue.Count == 0 || _playOrder.Count == 0)
+            {
+                return;
+            }
+
+            int nextOrderIndex = _orderIndex + 1;
+            if (nextOrderIndex >= _playOrder.Count)
+            {
+                if (_repeatMode == RepeatMode.All)
+                {
+                    nextOrderIndex = 0;
+                }
+                else
+                {
+                    shouldAutoplayWave = _settingsService.AutoplayWaveOnAlbumEnd;
+                    if (!shouldAutoplayWave)
+                    {
+                        Pause();
+                        Seek(TimeSpan.Zero);
+                        return;
+                    }
+                }
+            }
+
+            if (!shouldAutoplayWave)
+            {
+                _orderIndex = nextOrderIndex;
+                int trackIndex = _playOrder[_orderIndex];
+                trackToPlay = _queue[trackIndex];
+            }
+        }
+
+        if (shouldAutoplayWave)
+        {
+            if (await TryStartAlbumWaveOnQueueEndAsync().ConfigureAwait(false))
+            {
+                return;
+            }
+
+            Pause();
+            Seek(TimeSpan.Zero);
             return;
         }
 
-        int nextOrderIndex = _orderIndex + 1;
-        if (nextOrderIndex >= _playOrder.Count)
+        if (trackToPlay != null)
         {
-            if (_repeatMode == RepeatMode.All)
-            {
-                nextOrderIndex = 0;
-            }
-            else
-            {
-                // If album or queue ended, seamlessly continue with Wave if enabled
-                if (_settingsService.AutoplayWaveOnAlbumEnd && await TryStartAlbumWaveOnQueueEndAsync().ConfigureAwait(false))
-                {
-                    return;
-                }
-
-                Pause();
-                Seek(TimeSpan.Zero);
-                return;
-            }
+            await LoadAndPlayTrackAsync(trackToPlay).ConfigureAwait(false);
         }
-
-        _orderIndex = nextOrderIndex;
-        int trackIndex = _playOrder[_orderIndex];
-        var track = _queue[trackIndex];
-        await LoadAndPlayTrackAsync(track).ConfigureAwait(false);
     }
 
     private async Task<bool> TryStartAlbumWaveOnQueueEndAsync()
@@ -1331,10 +1348,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
         LogDebug("PreviousAsync passed debounce");
 
         CancelActiveCrossfade();
-        if (_queue.Count == 0 || _playOrder.Count == 0)
-        {
-            return;
-        }
 
         // If played more than 3 seconds, restart current track
         if (Position.TotalSeconds > 3.0)
@@ -1344,25 +1357,38 @@ public sealed class AudioPlayerService : IAudioPlayerService
             return;
         }
 
-        int prevOrderIndex = _orderIndex - 1;
-        if (prevOrderIndex < 0)
+        Track? trackToPlay = null;
+        lock (_queueLock)
         {
-            if (_repeatMode == RepeatMode.All)
+            if (_queue.Count == 0 || _playOrder.Count == 0)
             {
-                prevOrderIndex = _playOrder.Count - 1;
-            }
-            else
-            {
-                Seek(TimeSpan.Zero);
-                Play();
                 return;
             }
+
+            int prevOrderIndex = _orderIndex - 1;
+            if (prevOrderIndex < 0)
+            {
+                if (_repeatMode == RepeatMode.All)
+                {
+                    prevOrderIndex = _playOrder.Count - 1;
+                }
+                else
+                {
+                    Seek(TimeSpan.Zero);
+                    Play();
+                    return;
+                }
+            }
+
+            _orderIndex = prevOrderIndex;
+            int trackIndex = _playOrder[_orderIndex];
+            trackToPlay = _queue[trackIndex];
         }
 
-        _orderIndex = prevOrderIndex;
-        int trackIndex = _playOrder[_orderIndex];
-        var track = _queue[trackIndex];
-        await LoadAndPlayTrackAsync(track).ConfigureAwait(false);
+        if (trackToPlay != null)
+        {
+            await LoadAndPlayTrackAsync(trackToPlay).ConfigureAwait(false);
+        }
     }
 
     public void Seek(TimeSpan position)
@@ -2291,13 +2317,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     private void OnSettingsChanged(object? sender, string propName)
     {
-        if (propName == nameof(ISettingsService.GlobalHotkeysEnabled))
-        {
-            bool isMediaKeysEnabled = !_settingsService.GlobalHotkeysEnabled;
-            _mediaPlayer.CommandManager.IsEnabled = isMediaKeysEnabled;
-            LogDebug($"GlobalHotkeysEnabled changed to {_settingsService.GlobalHotkeysEnabled}. CommandManager.IsEnabled={isMediaKeysEnabled}");
-        }
-        else if (propName == nameof(ISettingsService.LoudnessNormalizationEnabled) || propName == nameof(ISettingsService.LoudnessTargetLufs))
+        if (propName == nameof(ISettingsService.LoudnessNormalizationEnabled) || propName == nameof(ISettingsService.LoudnessTargetLufs))
         {
             ApplyNormalizationGain();
         }

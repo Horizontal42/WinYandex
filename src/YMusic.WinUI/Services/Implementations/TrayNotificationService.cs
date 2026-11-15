@@ -981,6 +981,29 @@ public sealed class TrayNotificationService : ITrayNotificationService
             }
         }
 
+        else if (uMsg == WM_APPCOMMAND)
+        {
+            int cmd = (int)((lParam.ToInt64() >> 16) & 0xFFF);
+            switch (cmd)
+            {
+                case APPCOMMAND_MEDIA_PLAY_PAUSE:
+                    _audioPlayer.TogglePlayPause();
+                    return (IntPtr)1;
+                case APPCOMMAND_MEDIA_PLAY:
+                    _audioPlayer.Play();
+                    return (IntPtr)1;
+                case APPCOMMAND_MEDIA_PAUSE:
+                case APPCOMMAND_MEDIA_STOP:
+                    _audioPlayer.Pause();
+                    return (IntPtr)1;
+                case APPCOMMAND_MEDIA_NEXTTRACK:
+                    _ = _audioPlayer.NextAsync();
+                    return (IntPtr)1;
+                case APPCOMMAND_MEDIA_PREVIOUSTRACK:
+                    _ = _audioPlayer.PreviousAsync();
+                    return (IntPtr)1;
+            }
+        }
         else if (uMsg == WM_COMMAND)
         {
             uint hiword = (uint)((wParam.ToInt64() >> 16) & 0xFFFF);
