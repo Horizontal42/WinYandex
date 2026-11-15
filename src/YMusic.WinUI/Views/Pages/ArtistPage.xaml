@@ -293,18 +293,6 @@
                                                    Foreground="{ThemeResource TextFillColorTertiaryBrush}"
                                                    VerticalAlignment="Center"
                                                    HorizontalAlignment="Right" />
-
-                                        <Button Grid.Column="4"
-                                                Flyout="{StaticResource TrackOptionsFlyout}"
-                                                Width="36"
-                                                Height="36"
-                                                Padding="0"
-                                                CornerRadius="18"
-                                                Background="Transparent"
-                                                BorderBrush="Transparent"
-                                                helpers:CursorHelper.UseHandCursor="True">
-                                            <FontIcon Glyph="&#xE712;" FontSize="14" />
-                                        </Button>
                                     </Grid>
                                 </Button>
                             </DataTemplate>

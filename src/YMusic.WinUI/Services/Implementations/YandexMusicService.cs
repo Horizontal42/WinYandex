@@ -53,6 +53,9 @@ public sealed partial class YandexMusicService : IYandexMusicService
     };
     private string? _cachedUserId;
     private string? _token;
+    private IReadOnlyList<Track>? _cachedLikedTracks;
+    private DateTime _lastLikedTracksCacheTime = DateTime.MinValue;
+    private readonly SemaphoreSlim _likedTracksLock = new(1, 1);
 
     public event EventHandler? UnauthorizedResponseReceived;
     public event EventHandler? RegionRestrictionDetected;
@@ -275,11 +278,32 @@ public sealed partial class YandexMusicService : IYandexMusicService
 
     public async Task<IReadOnlyList<Track>> GetLikedTracksAsync(CancellationToken cancellationToken = default)
     {
-        string? userId = await GetCurrentUserIdAsync(cancellationToken).ConfigureAwait(false);
-        if (string.IsNullOrWhiteSpace(userId)) return Array.Empty<Track>();
-        var ids = await GetLikedTrackIdsAsync(userId, cancellationToken).ConfigureAwait(false);
-        if (ids == null || ids.Count == 0) return Array.Empty<Track>();
-        return await GetTracksAsync(ids, cancellationToken).ConfigureAwait(false);
+        if (_cachedLikedTracks != null && (DateTime.UtcNow - _lastLikedTracksCacheTime) < TimeSpan.FromMinutes(10))
+        {
+            return _cachedLikedTracks;
+        }
+
+        await _likedTracksLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_cachedLikedTracks != null && (DateTime.UtcNow - _lastLikedTracksCacheTime) < TimeSpan.FromMinutes(10))
+            {
+                return _cachedLikedTracks;
+            }
+
+            string? userId = await GetCurrentUserIdAsync(cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(userId)) return Array.Empty<Track>();
+            var ids = await GetLikedTrackIdsAsync(userId, cancellationToken).ConfigureAwait(false);
+            if (ids == null || ids.Count == 0) return Array.Empty<Track>();
+            var tracks = await GetTracksAsync(ids, cancellationToken).ConfigureAwait(false);
+            _cachedLikedTracks = tracks;
+            _lastLikedTracksCacheTime = DateTime.UtcNow;
+            return tracks;
+        }
+        finally
+        {
+            _likedTracksLock.Release();
+        }
     }
 
     public bool IsTrackLiked(string trackId)
