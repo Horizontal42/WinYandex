@@ -95,7 +95,7 @@ public sealed class AppSettings
     public int CrossfadeDurationSeconds { get; set; } = 4;
 
     [JsonPropertyName("loudnessNormalizationEnabled")]
-    public bool LoudnessNormalizationEnabled { get; set; } = true;
+    public bool LoudnessNormalizationEnabled { get; set; } = false;
 
     [JsonPropertyName("globalHotkeysEnabled")]
     public bool GlobalHotkeysEnabled { get; set; } = true;

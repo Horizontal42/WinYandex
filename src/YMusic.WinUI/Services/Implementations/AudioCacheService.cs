@@ -336,9 +336,11 @@ public sealed class AudioCacheService : IAudioCacheService
             return false;
         }
 
+        string cleanId = trackId.Split(':')[0];
         lock (_lock)
         {
-            if (_metadata.Entries.TryGetValue(trackId, out var entry))
+            if (_metadata.Entries.TryGetValue(trackId, out var entry) ||
+                _metadata.Entries.TryGetValue(cleanId, out entry))
             {
                 string fullPath = Path.Combine(_cacheBaseDir, entry.RelativePath);
                 if (File.Exists(fullPath))
@@ -363,6 +365,7 @@ public sealed class AudioCacheService : IAudioCacheService
 
                 // If file disappeared, prune entry
                 _metadata.Entries.Remove(trackId);
+                _metadata.Entries.Remove(cleanId);
                 _isDirty = true;
                 _saveDebounceTimer.Stop();
                 _saveDebounceTimer.Start();
@@ -379,9 +382,11 @@ public sealed class AudioCacheService : IAudioCacheService
             return false;
         }
 
+        string cleanId = trackId.Split(':')[0];
         lock (_lock)
         {
-            if (_metadata.Entries.TryGetValue(trackId, out var entry))
+            if (_metadata.Entries.TryGetValue(trackId, out var entry) ||
+                _metadata.Entries.TryGetValue(cleanId, out entry))
             {
                 string fullPath = Path.Combine(_cacheBaseDir, entry.RelativePath);
                 return File.Exists(fullPath);

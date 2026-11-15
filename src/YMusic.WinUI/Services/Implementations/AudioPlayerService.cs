@@ -1737,7 +1737,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
             quality = cachedQuality;
             _preloadedTrack = null;
         }
-        else if (_preloadedTrack?.TrackId == track.Id && !string.IsNullOrEmpty(_preloadedTrack.Value.StreamUrl))
+        else if (_preloadedTrack.HasValue && Track.IsSameTrackId(_preloadedTrack.Value.TrackId, track.Id) && !string.IsNullOrEmpty(_preloadedTrack.Value.StreamUrl))
         {
             streamUrl = _preloadedTrack.Value.StreamUrl;
             quality = _preloadedTrack.Value.Quality;
@@ -2033,6 +2033,35 @@ public sealed class AudioPlayerService : IAudioPlayerService
             _mediaPlayer.CommandManager.IsEnabled = isMediaKeysEnabled;
             LogDebug($"GlobalHotkeysEnabled changed to {_settingsService.GlobalHotkeysEnabled}. CommandManager.IsEnabled={isMediaKeysEnabled}");
         }
+        else if (propName == nameof(ISettingsService.LoudnessNormalizationEnabled))
+        {
+            ApplyNormalizationGain();
+        }
+    }
+
+    private void ApplyNormalizationGain()
+    {
+        try
+        {
+            double targetGain = _settingsService.LoudnessNormalizationEnabled
+                ? (_currentTrack?.CalculateNormalizationGain() ?? 1.0)
+                : 1.0;
+
+            if (_currentInputNode != null && !_isCrossfading)
+            {
+                _currentInputNode.OutgoingGain = targetGain;
+            }
+
+            if (_audioGraph == null || _currentInputNode == null)
+            {
+                _mediaPlayer.Volume = Math.Clamp((_volume / 100.0) * targetGain, 0.0, 1.0);
+            }
+            LogDebug($"[Normalization] Realtime update: OutgoingGain={targetGain:F3} (Enabled={_settingsService.LoudnessNormalizationEnabled})");
+        }
+        catch (Exception ex)
+        {
+            LogDebug($"[Normalization] Failed to apply gain: {ex.Message}");
+        }
     }
 
     public static void LogDebug(string msg)
@@ -2049,7 +2078,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     private long _lastNavTicks;
     private readonly object _navDebounceLock = new();
-    private bool CheckNavDebounce(int thresholdMs = 350)
+    private bool CheckNavDebounce(int thresholdMs = 120)
     {
         lock (_navDebounceLock)
         {
