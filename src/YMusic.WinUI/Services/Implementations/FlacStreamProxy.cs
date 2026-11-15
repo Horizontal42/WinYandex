@@ -7,6 +7,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Security.Cryptography;
 using System.Threading;
 using System.Threading.Tasks;
 using YMusic.WinUI.Services.Interfaces;
@@ -15,11 +16,72 @@ namespace YMusic.WinUI.Services.Implementations;
 
 public sealed class FlacStreamProxy : IFlacStreamProxy
 {
-    private sealed record StreamMetadata(string CdnUrl, byte[] Key, DateTime CreatedAt);
+    private sealed class StreamMetadata : IDisposable
+    {
+        public string CdnUrl { get; }
+        public DateTime CreatedAt { get; }
+
+        private byte[]? _key;
+        private int _refCount = 1;
+        private bool _isDisposed;
+        private readonly object _lock = new();
+
+        public StreamMetadata(string cdnUrl, byte[] key)
+        {
+            CdnUrl = cdnUrl;
+            _key = (byte[])key.Clone();
+            CreatedAt = DateTime.UtcNow;
+        }
+
+        public bool TryAddRef()
+        {
+            lock (_lock)
+            {
+                if (_isDisposed || _key == null) return false;
+                _refCount++;
+                return true;
+            }
+        }
+
+        public byte[]? GetKeyCopy()
+        {
+            lock (_lock)
+            {
+                if (_isDisposed || _key == null) return null;
+                return (byte[])_key.Clone();
+            }
+        }
+
+        public void Release()
+        {
+            byte[]? toZero = null;
+            lock (_lock)
+            {
+                _refCount--;
+                if (_refCount <= 0 && !_isDisposed)
+                {
+                    _isDisposed = true;
+                    toZero = _key;
+                    _key = null;
+                }
+            }
+
+            if (toZero != null)
+            {
+                try
+                {
+                    CryptographicOperations.ZeroMemory(toZero);
+                }
+                catch { }
+            }
+        }
+
+        public void Dispose() => Release();
+    }
 
     private readonly HttpListener _listener;
     private readonly HttpClient _httpClient;
-    private readonly ConcurrentDictionary<string, StreamMetadata> _activeStreams = new();
+    private readonly ConcurrentDictionary<string, StreamMetadata> _activeStreams = new(StringComparer.OrdinalIgnoreCase);
     private readonly CancellationTokenSource _cts = new();
     private readonly int _port;
     private bool _disposed;
@@ -84,21 +146,31 @@ public sealed class FlacStreamProxy : IFlacStreamProxy
                 {
                     if (_activeStreams.TryRemove(kvp.Key, out var oldMeta))
                     {
-                        try { System.Security.Cryptography.CryptographicOperations.ZeroMemory(oldMeta.Key); } catch { }
+                        oldMeta.Release();
                     }
                 }
             }
         }
 
-        _activeStreams[trackId] = new StreamMetadata(cdnUrl, keyBytes, DateTime.UtcNow);
-        return $"http://127.0.0.1:{_port}/flac/{trackId}";
+        var newMeta = new StreamMetadata(cdnUrl, keyBytes);
+        if (_activeStreams.TryGetValue(trackId, out var existing))
+        {
+            _activeStreams[trackId] = newMeta;
+            existing.Release();
+        }
+        else
+        {
+            _activeStreams[trackId] = newMeta;
+        }
+
+        return $"http://127.0.0.1:{_port}/flac/{Uri.EscapeDataString(trackId)}";
     }
 
     public void UnregisterStream(string trackId)
     {
         if (_activeStreams.TryRemove(trackId, out var meta))
         {
-            try { System.Security.Cryptography.CryptographicOperations.ZeroMemory(meta.Key); } catch { }
+            meta.Release();
         }
     }
 
@@ -125,6 +197,9 @@ public sealed class FlacStreamProxy : IFlacStreamProxy
     private async Task HandleRequestAsync(HttpListenerContext context, CancellationToken ct)
     {
         var response = context.Response;
+        StreamMetadata? meta = null;
+        byte[]? keyCopy = null;
+
         try
         {
             if (!context.Request.IsLocal)
@@ -134,11 +209,27 @@ public sealed class FlacStreamProxy : IFlacStreamProxy
                 return;
             }
 
-            string path = context.Request.Url?.AbsolutePath ?? string.Empty;
-            // Expected path: /flac/{trackId}
-            string trackId = path.TrimStart('/').Replace("flac/", "");
+            string rawPath = context.Request.Url?.AbsolutePath ?? string.Empty;
+            const string prefix = "/flac/";
+            if (!rawPath.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                response.StatusCode = (int)HttpStatusCode.BadRequest;
+                response.Close();
+                return;
+            }
 
-            if (!_activeStreams.TryGetValue(trackId, out var meta))
+            string encodedTrackId = rawPath.Substring(prefix.Length);
+            string trackId = Uri.UnescapeDataString(encodedTrackId).Trim();
+
+            if (!_activeStreams.TryGetValue(trackId, out meta) || !meta.TryAddRef())
+            {
+                response.StatusCode = (int)HttpStatusCode.NotFound;
+                response.Close();
+                return;
+            }
+
+            keyCopy = meta.GetKeyCopy();
+            if (keyCopy == null)
             {
                 response.StatusCode = (int)HttpStatusCode.NotFound;
                 response.Close();
@@ -187,6 +278,9 @@ public sealed class FlacStreamProxy : IFlacStreamProxy
             using var upstreamStream = await upstreamResp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var clientStream = response.OutputStream;
 
+            // Single decryptor instance per stream request
+            using var decryptor = new AesCtrDecryptor(keyCopy);
+
             byte[] buffer = new byte[65536];
             byte[] decrypted = new byte[65536];
             long currentOffset = startOffset;
@@ -194,7 +288,7 @@ public sealed class FlacStreamProxy : IFlacStreamProxy
             int read;
             while ((read = await upstreamStream.ReadAsync(buffer, 0, buffer.Length, ct).ConfigureAwait(false)) > 0)
             {
-                AesCtrHelper.DecryptBlock(meta.Key, currentOffset, buffer, 0, read, decrypted, 0);
+                decryptor.DecryptBlock(currentOffset, buffer, 0, read, decrypted, 0);
                 await clientStream.WriteAsync(decrypted, 0, read, ct).ConfigureAwait(false);
                 currentOffset += read;
             }
@@ -211,6 +305,11 @@ public sealed class FlacStreamProxy : IFlacStreamProxy
         }
         finally
         {
+            if (keyCopy != null)
+            {
+                try { CryptographicOperations.ZeroMemory(keyCopy); } catch { }
+            }
+            meta?.Release();
             try { response.Close(); } catch { }
         }
     }
@@ -230,7 +329,7 @@ public sealed class FlacStreamProxy : IFlacStreamProxy
 
             foreach (var meta in _activeStreams.Values)
             {
-                try { System.Security.Cryptography.CryptographicOperations.ZeroMemory(meta.Key); } catch { }
+                meta.Release();
             }
             _activeStreams.Clear();
         }

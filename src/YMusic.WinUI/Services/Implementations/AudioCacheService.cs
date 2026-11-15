@@ -299,6 +299,28 @@ public sealed class AudioCacheService : IAudioCacheService
                         else
                         {
                             kvp.Value.FileSizeBytes = info.Length;
+
+                            // Self-heal/migrate: if file is named .flac but is actually an ISO-BMFF (MP4) container
+                            if (kvp.Value.RelativePath.EndsWith(".flac", StringComparison.OrdinalIgnoreCase))
+                            {
+                                if (DetectAudioContainerExtension(fullPath, kvp.Value.Codec) == ".mp4")
+                                {
+                                    string newRelativePath = Path.ChangeExtension(kvp.Value.RelativePath, ".mp4");
+                                    string newFullPath = Path.Combine(_cacheBaseDir, newRelativePath);
+                                    try
+                                    {
+                                        if (File.Exists(newFullPath)) File.Delete(newFullPath);
+                                        File.Move(fullPath, newFullPath);
+                                        kvp.Value.RelativePath = newRelativePath;
+                                        changed = true;
+                                        Debug.WriteLine($"[AudioCache] Migrated FLAC-in-MP4 from .flac to .mp4: {newRelativePath}");
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        Debug.WriteLine($"[AudioCache] Failed to migrate file {fullPath}: {ex.Message}");
+                                    }
+                                }
+                            }
                         }
                     }
                     catch
@@ -326,7 +348,52 @@ public sealed class AudioCacheService : IAudioCacheService
         }
     }
 
-    public bool TryGetCachedTrack(string trackId, out string? filePath, out StreamAudioQuality? quality, bool updateAccessTime = true)
+    public static string DetectAudioContainerExtension(string filePath, string? reportedCodec)
+    {
+        try
+        {
+            using var fs = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+            byte[] header = new byte[16];
+            int read = fs.Read(header, 0, header.Length);
+            if (read >= 8)
+            {
+                // ISO-BMFF / MP4 container signature: 'ftyp' at offset 4
+                if (header[4] == 0x66 && header[5] == 0x74 && header[6] == 0x79 && header[7] == 0x70)
+                {
+                    return ".mp4";
+                }
+                // Raw FLAC signature: 'fLaC' at offset 0
+                if (header[0] == 0x66 && header[1] == 0x4C && header[2] == 0x61 && header[3] == 0x43)
+                {
+                    return ".flac";
+                }
+                // ID3v2 container (MP3)
+                if (header[0] == 0x49 && header[1] == 0x44 && header[2] == 0x33)
+                {
+                    return ".mp3";
+                }
+                // MPEG Audio Frame Sync: 11 bits set (0xFFE0)
+                if (header[0] == 0xFF && (header[1] & 0xE0) == 0xE0)
+                {
+                    return ".mp3";
+                }
+                // AAC ADTS Header
+                if (header[0] == 0xFF && (header[1] == 0xF1 || header[1] == 0xF9))
+                {
+                    return ".aac";
+                }
+            }
+        }
+        catch { }
+
+        string codec = reportedCodec?.ToLowerInvariant() ?? "";
+        if (codec.Contains("flac-mp4")) return ".mp4";
+        if (string.Equals(codec, "flac", StringComparison.OrdinalIgnoreCase)) return ".flac";
+        if (codec.Contains("aac")) return ".aac";
+        return ".mp3";
+    }
+
+    public bool TryGetCachedTrack(string trackId, out string? filePath, out StreamAudioQuality? quality, bool updateAccessTime = true, AudioQualityPreference? preferredQuality = null)
     {
         filePath = null;
         quality = null;
@@ -342,6 +409,13 @@ public sealed class AudioCacheService : IAudioCacheService
             if (_metadata.Entries.TryGetValue(trackId, out var entry) ||
                 _metadata.Entries.TryGetValue(cleanId, out entry))
             {
+                // Quality check: if user chose Lossless, but cache is MP3/AAC, yield cache miss for upgrade
+                if (preferredQuality == AudioQualityPreference.Lossless &&
+                    !entry.Codec.Contains("flac", StringComparison.OrdinalIgnoreCase))
+                {
+                    return false;
+                }
+
                 string fullPath = Path.Combine(_cacheBaseDir, entry.RelativePath);
                 if (File.Exists(fullPath))
                 {
@@ -414,9 +488,16 @@ public sealed class AudioCacheService : IAudioCacheService
 
         lock (_lock)
         {
-            if (_metadata.Entries.ContainsKey(trackId))
+            if (_metadata.Entries.TryGetValue(trackId, out var existing))
             {
-                return;
+                // Allow upgrade: if incoming is FLAC but cached is lossy, allow re-download
+                bool isIncomingFlac = quality != null && quality.Codec.Contains("flac", StringComparison.OrdinalIgnoreCase);
+                bool isExistingFlac = existing.Codec.Contains("flac", StringComparison.OrdinalIgnoreCase);
+
+                if (!isIncomingFlac || isExistingFlac)
+                {
+                    return;
+                }
             }
         }
 
@@ -450,10 +531,6 @@ public sealed class AudioCacheService : IAudioCacheService
         string sanitizedId = SanitizeFileName(trackId);
         string codec = string.IsNullOrWhiteSpace(quality?.Codec) ? "mp3" : quality.Codec.ToLowerInvariant();
         int bitrate = quality?.BitrateInKbps ?? 320;
-        string ext = codec.Contains("aac") ? ".aac" : (string.Equals(codec, "flac", StringComparison.OrdinalIgnoreCase) ? ".flac" : (codec.Contains("flac") ? ".mp4" : ".mp3"));
-        string targetFileName = $"{sanitizedId}_{codec}_{bitrate}{ext}";
-        string targetRelativePath = Path.Combine("Audio", targetFileName);
-        string targetFullPath = Path.Combine(_cacheBaseDir, targetRelativePath);
 
         string tempFileName = $"temp_{sanitizedId}_{Guid.NewGuid():N}.part";
         string tempFullPath = Path.Combine(_audioDir, tempFileName);
@@ -463,15 +540,6 @@ public sealed class AudioCacheService : IAudioCacheService
             await _downloadSemaphore.WaitAsync(cts.Token).ConfigureAwait(false);
             try
             {
-                // Recheck if cached while waiting for semaphore
-                lock (_lock)
-                {
-                    if (_metadata.Entries.ContainsKey(trackId) && File.Exists(targetFullPath))
-                    {
-                        return targetFullPath;
-                    }
-                }
-
                 using var response = await _httpClient.GetAsync(streamUrl, HttpCompletionOption.ResponseHeadersRead, cts.Token).ConfigureAwait(false);
                 if (!response.IsSuccessStatusCode)
                 {
@@ -492,6 +560,12 @@ public sealed class AudioCacheService : IAudioCacheService
                     return null;
                 }
 
+                // Detect actual container format from file bytes
+                string detectedExt = DetectAudioContainerExtension(tempFullPath, codec);
+                string targetFileName = $"{sanitizedId}_{codec}_{bitrate}{detectedExt}";
+                string targetRelativePath = Path.Combine("Audio", targetFileName);
+                string targetFullPath = Path.Combine(_cacheBaseDir, targetRelativePath);
+
                 // Atomic commit
                 if (File.Exists(targetFullPath))
                 {
@@ -499,19 +573,29 @@ public sealed class AudioCacheService : IAudioCacheService
                 }
                 File.Move(tempFullPath, targetFullPath);
 
-                var entry = new AudioCacheEntry
-                {
-                    TrackId = trackId,
-                    RelativePath = targetRelativePath,
-                    FileSizeBytes = fileInfo.Length,
-                    Codec = codec,
-                    BitrateInKbps = bitrate,
-                    CachedAtUtc = DateTime.UtcNow,
-                    LastAccessedUtc = DateTime.UtcNow
-                };
-
+                // If upgrading from a previous file with different extension (e.g. .mp3 -> .mp4 FLAC), delete old file
                 lock (_lock)
                 {
+                    if (_metadata.Entries.TryGetValue(trackId, out var oldEntry))
+                    {
+                        string oldFullPath = Path.Combine(_cacheBaseDir, oldEntry.RelativePath);
+                        if (!string.Equals(oldFullPath, targetFullPath, StringComparison.OrdinalIgnoreCase) && File.Exists(oldFullPath))
+                        {
+                            try { File.Delete(oldFullPath); } catch { }
+                        }
+                    }
+
+                    var entry = new AudioCacheEntry
+                    {
+                        TrackId = trackId,
+                        RelativePath = targetRelativePath,
+                        FileSizeBytes = fileInfo.Length,
+                        Codec = codec,
+                        BitrateInKbps = bitrate,
+                        CachedAtUtc = DateTime.UtcNow,
+                        LastAccessedUtc = DateTime.UtcNow
+                    };
+
                     _metadata.Entries[trackId] = entry;
                     EnforceCacheLimitLocked();
                     SaveIndexLocked();

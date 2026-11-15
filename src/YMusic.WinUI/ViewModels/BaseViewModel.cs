@@ -39,8 +39,9 @@ public abstract partial class BaseViewModel : ObservableObject
 
     protected DispatcherQueue GetDispatcherQueue()
     {
-        return _dispatcherQueue ??= (DispatcherQueue.GetForCurrentThread()
-            ?? DispatcherQueueController.CreateOnCurrentThread().DispatcherQueue);
+        return _dispatcherQueue ??= (App.MainDispatcherQueue
+            ?? DispatcherQueue.GetForCurrentThread()
+            ?? throw new InvalidOperationException("UI DispatcherQueue is not initialized. Ensure App.MainDispatcherQueue is set."));
     }
 
     public void RunOnUi(Action action)

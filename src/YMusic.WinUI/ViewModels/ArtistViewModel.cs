@@ -265,6 +265,13 @@ public sealed partial class ArtistViewModel : BaseViewModel
                         CollectionTracks.Add(sourceTrack);
                         HasCollectionTracks = true;
                         OnPropertyChanged(nameof(CollectionTracksCountText));
+
+                        if (wave != null)
+                        {
+                            WaveTracks.Remove(wave);
+                            HasWaveTracks = WaveTracks.Count > 0;
+                            OnPropertyChanged(nameof(WaveTracksCountText));
+                        }
                     }
                 }
             });
@@ -541,6 +548,7 @@ public sealed partial class ArtistViewModel : BaseViewModel
             var artistWaveTracks = allWave
                 .Where(t => (t.Artists != null && t.Artists.Any(a => a.Id == artistId)) ||
                             (!string.IsNullOrWhiteSpace(artistName) && t.ArtistNames.Contains(artistName, StringComparison.OrdinalIgnoreCase)))
+                .Where(w => !artistCollectionTracks.Any(c => Track.IsSameTrackId(c.Id, w.Id)))
                 .DistinctBy(t => t.Id)
                 .ToList();
 

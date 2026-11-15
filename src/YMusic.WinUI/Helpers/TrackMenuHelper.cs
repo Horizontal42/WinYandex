@@ -432,7 +432,9 @@ public static class TrackMenuHelper
                     return;
                 }
 
-                string ext = string.Equals(quality?.Codec, "aac", StringComparison.OrdinalIgnoreCase) ? "m4a" : "mp3";
+                string ext = quality != null && quality.Codec.Contains("flac", StringComparison.OrdinalIgnoreCase)
+                    ? "flac"
+                    : (string.Equals(quality?.Codec, "aac", StringComparison.OrdinalIgnoreCase) ? "m4a" : "mp3");
                 string rawName = $"{track.ArtistNames} - {track.FullTitle}.{ext}";
                 string cleanName = string.Join("_", rawName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries)).Trim();
                 if (string.IsNullOrWhiteSpace(cleanName)) cleanName = $"Track_{track.Id}.{ext}";

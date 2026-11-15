@@ -198,7 +198,16 @@ public sealed class AudioPlayerService : IAudioPlayerService
         }
     }
 
-    public IReadOnlyList<Track> Queue => _queue;
+    public IReadOnlyList<Track> Queue
+    {
+        get
+        {
+            lock (_queueLock)
+            {
+                return _queue.ToList().AsReadOnly();
+            }
+        }
+    }
 
     public IReadOnlyList<Track> UpcomingQueue
     {
@@ -243,9 +252,18 @@ public sealed class AudioPlayerService : IAudioPlayerService
         }
     }
 
-    public int CurrentIndex => (_orderIndex >= 0 && _orderIndex < _playOrder.Count)
-        ? _playOrder[_orderIndex]
-        : -1;
+    public int CurrentIndex
+    {
+        get
+        {
+            lock (_queueLock)
+            {
+                return (_orderIndex >= 0 && _orderIndex < _playOrder.Count)
+                    ? _playOrder[_orderIndex]
+                    : -1;
+            }
+        }
+    }
 
     private PlaybackMode _currentPlaybackMode = PlaybackMode.None;
 
@@ -497,10 +515,23 @@ public sealed class AudioPlayerService : IAudioPlayerService
         {
             try
             {
-                if (_currentTrack == null && _queue.Count == 0)
+                List<Track> queueSnapshot;
+                List<int> playOrderSnapshot;
+                int orderIndexSnapshot;
+                Track? currentTrackSnapshot;
+
+                lock (_queueLock)
                 {
-                    _playbackStateStorage.ClearPlaybackState();
-                    return;
+                    if (_currentTrack == null && _queue.Count == 0)
+                    {
+                        _playbackStateStorage.ClearPlaybackState();
+                        return;
+                    }
+
+                    queueSnapshot = new List<Track>(_queue);
+                    playOrderSnapshot = new List<int>(_playOrder);
+                    orderIndexSnapshot = _orderIndex;
+                    currentTrackSnapshot = _currentTrack;
                 }
 
                 var state = new PlaybackSessionState
@@ -510,11 +541,11 @@ public sealed class AudioPlayerService : IAudioPlayerService
                     RepeatMode = _repeatMode,
                     IsShuffle = _isShuffle,
                     PlaybackMode = _currentPlaybackMode,
-                    OrderIndex = _orderIndex,
+                    OrderIndex = orderIndexSnapshot,
                     PositionSeconds = Position.TotalSeconds,
-                    CurrentTrack = _currentTrack,
-                    Queue = new List<Track>(_queue),
-                    PlayOrder = new List<int>(_playOrder)
+                    CurrentTrack = currentTrackSnapshot,
+                    Queue = queueSnapshot,
+                    PlayOrder = playOrderSnapshot
                 };
 
                 _playbackStateStorage.SavePlaybackState(state);
@@ -694,64 +725,73 @@ public sealed class AudioPlayerService : IAudioPlayerService
         if (track == null || !track.Available) return;
         _consecutivePlaybackFailures = 0;
 
-        if (newQueue != null)
+        bool queueChanged = false;
+        lock (_queueLock)
         {
-            var newQueueList = newQueue as IList<Track> ?? newQueue.ToList();
-            bool isSame = IsSameQueue(_queue, newQueueList);
-
-            if (!isSame)
+            if (newQueue != null)
             {
-                _queue.Clear();
-                _queue.AddRange(newQueueList);
-                RebuildPlayOrder();
-                QueueChanged?.Invoke(this, EventArgs.Empty);
-            }
+                var newQueueList = newQueue as IList<Track> ?? newQueue.ToList();
+                bool isSame = IsSameQueue(_queue, newQueueList);
 
-            int trackIndex = _queue.FindIndex(t => Track.IsSameTrackId(t.Id, track.Id));
-            if (trackIndex >= 0)
-            {
-                if (_isShuffle)
+                if (!isSame)
                 {
-                    _playOrder.Remove(trackIndex);
-                    _playOrder.Insert(0, trackIndex);
-                    _orderIndex = 0;
+                    _queue.Clear();
+                    _queue.AddRange(newQueueList);
+                    RebuildPlayOrder();
+                    queueChanged = true;
+                }
+
+                int trackIndex = _queue.FindIndex(t => Track.IsSameTrackId(t.Id, track.Id));
+                if (trackIndex >= 0)
+                {
+                    if (_isShuffle)
+                    {
+                        _playOrder.Remove(trackIndex);
+                        _playOrder.Insert(0, trackIndex);
+                        _orderIndex = 0;
+                    }
+                    else
+                    {
+                        _orderIndex = _playOrder.IndexOf(trackIndex);
+                    }
                 }
                 else
                 {
-                    _orderIndex = _playOrder.IndexOf(trackIndex);
+                    _queue.Insert(0, track);
+                    RebuildPlayOrder();
+                    _orderIndex = 0;
+                    queueChanged = true;
                 }
             }
             else
             {
-                _queue.Insert(0, track);
-                RebuildPlayOrder();
-                _orderIndex = 0;
-                QueueChanged?.Invoke(this, EventArgs.Empty);
+                int existing = _queue.FindIndex(t => Track.IsSameTrackId(t.Id, track.Id));
+                if (existing >= 0)
+                {
+                    if (_isShuffle)
+                    {
+                        _playOrder.Remove(existing);
+                        _playOrder.Insert(0, existing);
+                        _orderIndex = 0;
+                    }
+                    else
+                    {
+                        _orderIndex = _playOrder.IndexOf(existing);
+                    }
+                }
+                else
+                {
+                    _queue.Add(track);
+                    RebuildPlayOrder();
+                    _orderIndex = _playOrder.IndexOf(_queue.Count - 1);
+                    queueChanged = true;
+                }
             }
         }
-        else
+
+        if (queueChanged)
         {
-            int existing = _queue.FindIndex(t => Track.IsSameTrackId(t.Id, track.Id));
-            if (existing >= 0)
-            {
-                if (_isShuffle)
-                {
-                    _playOrder.Remove(existing);
-                    _playOrder.Insert(0, existing);
-                    _orderIndex = 0;
-                }
-                else
-                {
-                    _orderIndex = _playOrder.IndexOf(existing);
-                }
-            }
-            else
-            {
-                _queue.Add(track);
-                RebuildPlayOrder();
-                _orderIndex = _playOrder.IndexOf(_queue.Count - 1);
-                QueueChanged?.Invoke(this, EventArgs.Empty);
-            }
+            QueueChanged?.Invoke(this, EventArgs.Empty);
         }
 
         await LoadAndPlayTrackAsync(track).ConfigureAwait(false);
@@ -766,61 +806,73 @@ public sealed class AudioPlayerService : IAudioPlayerService
         }
         _consecutivePlaybackFailures = 0;
 
-        bool isSame = IsSameQueue(_queue, tracks);
-        if (!isSame)
-        {
-            _queue.Clear();
-            _queue.AddRange(tracks);
-            RebuildPlayOrder();
-            QueueChanged?.Invoke(this, EventArgs.Empty);
-        }
+        Track trackToPlay;
+        bool queueChanged = false;
 
-        int targetIndex;
-        if (_isShuffle && startIndex == 0)
+        lock (_queueLock)
         {
-            // Shuffling from beginning of the list: play the first track in shuffle order
-            _orderIndex = 0;
-            targetIndex = (_playOrder.Count > 0) ? _playOrder[0] : 0;
-            if (targetIndex >= 0 && targetIndex < _queue.Count && !_queue[targetIndex].Available)
+            bool isSame = IsSameQueue(_queue, tracks);
+            if (!isSame)
             {
-                int firstAvail = _playOrder.FindIndex(idx => idx >= 0 && idx < _queue.Count && _queue[idx].Available);
-                if (firstAvail >= 0)
-                {
-                    _orderIndex = firstAvail;
-                    targetIndex = _playOrder[firstAvail];
-                }
-            }
-        }
-        else
-        {
-            targetIndex = Math.Clamp(startIndex, 0, _queue.Count - 1);
-            if (!_queue[targetIndex].Available)
-            {
-                int firstAvailable = _queue.FindIndex(targetIndex, t => t.Available);
-                if (firstAvailable < 0) firstAvailable = _queue.FindIndex(t => t.Available);
-                if (firstAvailable >= 0)
-                {
-                    targetIndex = firstAvailable;
-                }
-                else
-                {
-                    return;
-                }
+                _queue.Clear();
+                _queue.AddRange(tracks);
+                RebuildPlayOrder();
+                queueChanged = true;
             }
 
-            if (_isShuffle)
+            int targetIndex;
+            if (_isShuffle && startIndex == 0)
             {
-                _playOrder.Remove(targetIndex);
-                _playOrder.Insert(0, targetIndex);
+                // Shuffling from beginning of the list: play the first track in shuffle order
                 _orderIndex = 0;
+                targetIndex = (_playOrder.Count > 0) ? _playOrder[0] : 0;
+                if (targetIndex >= 0 && targetIndex < _queue.Count && !_queue[targetIndex].Available)
+                {
+                    int firstAvail = _playOrder.FindIndex(idx => idx >= 0 && idx < _queue.Count && _queue[idx].Available);
+                    if (firstAvail >= 0)
+                    {
+                        _orderIndex = firstAvail;
+                        targetIndex = _playOrder[firstAvail];
+                    }
+                }
             }
             else
             {
-                _orderIndex = _playOrder.IndexOf(targetIndex);
+                targetIndex = Math.Clamp(startIndex, 0, _queue.Count - 1);
+                if (!_queue[targetIndex].Available)
+                {
+                    int firstAvailable = _queue.FindIndex(targetIndex, t => t.Available);
+                    if (firstAvailable < 0) firstAvailable = _queue.FindIndex(t => t.Available);
+                    if (firstAvailable >= 0)
+                    {
+                        targetIndex = firstAvailable;
+                    }
+                    else
+                    {
+                        return;
+                    }
+                }
+
+                if (_isShuffle)
+                {
+                    _playOrder.Remove(targetIndex);
+                    _playOrder.Insert(0, targetIndex);
+                    _orderIndex = 0;
+                }
+                else
+                {
+                    _orderIndex = _playOrder.IndexOf(targetIndex);
+                }
             }
+
+            trackToPlay = _queue[targetIndex];
         }
 
-        var trackToPlay = _queue[targetIndex];
+        if (queueChanged)
+        {
+            QueueChanged?.Invoke(this, EventArgs.Empty);
+        }
+
         await LoadAndPlayTrackAsync(trackToPlay).ConfigureAwait(false);
     }
 
@@ -829,24 +881,27 @@ public sealed class AudioPlayerService : IAudioPlayerService
         var list = tracks.ToList();
         if (list.Count == 0) return;
 
-        int previousCount = _queue.Count;
-        _queue.AddRange(list);
+        lock (_queueLock)
+        {
+            int previousCount = _queue.Count;
+            _queue.AddRange(list);
 
-        if (_isShuffle)
-        {
-            var newIndices = Enumerable.Range(previousCount, list.Count).ToList();
-            for (int i = newIndices.Count - 1; i > 0; i--)
+            if (_isShuffle)
             {
-                int j = RandomNumberGenerator.GetInt32(i + 1);
-                (newIndices[i], newIndices[j]) = (newIndices[j], newIndices[i]);
+                var newIndices = Enumerable.Range(previousCount, list.Count).ToList();
+                for (int i = newIndices.Count - 1; i > 0; i--)
+                {
+                    int j = RandomNumberGenerator.GetInt32(i + 1);
+                    (newIndices[i], newIndices[j]) = (newIndices[j], newIndices[i]);
+                }
+                _playOrder.AddRange(newIndices);
             }
-            _playOrder.AddRange(newIndices);
-        }
-        else
-        {
-            for (int i = previousCount; i < _queue.Count; i++)
+            else
             {
-                _playOrder.Add(i);
+                for (int i = previousCount; i < _queue.Count; i++)
+                {
+                    _playOrder.Add(i);
+                }
             }
         }
 
@@ -856,34 +911,40 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     public void PlayNext(Track track)
     {
-        if (_queue.Count == 0 || _orderIndex < 0)
+        if (track == null) return;
+
+        lock (_queueLock)
         {
-            _ = PlayTrackAsync(track);
-            return;
-        }
-
-        int currentTrackQueueIndex = (_orderIndex >= 0 && _orderIndex < _playOrder.Count)
-            ? _playOrder[_orderIndex]
-            : -1;
-
-        int insertQueueIndex = currentTrackQueueIndex >= 0 ? currentTrackQueueIndex + 1 : _queue.Count;
-        if (insertQueueIndex > _queue.Count) insertQueueIndex = _queue.Count;
-
-        _queue.Insert(insertQueueIndex, track);
-
-        for (int i = 0; i < _playOrder.Count; i++)
-        {
-            if (_playOrder[i] >= insertQueueIndex)
+            if (_queue.Count == 0 || _orderIndex < 0)
             {
-                _playOrder[i]++;
+                _ = PlayTrackAsync(track);
+                return;
             }
+
+            int currentTrackQueueIndex = (_orderIndex >= 0 && _orderIndex < _playOrder.Count)
+                ? _playOrder[_orderIndex]
+                : -1;
+
+            int insertQueueIndex = currentTrackQueueIndex >= 0 ? currentTrackQueueIndex + 1 : _queue.Count;
+            if (insertQueueIndex > _queue.Count) insertQueueIndex = _queue.Count;
+
+            _queue.Insert(insertQueueIndex, track);
+
+            for (int i = 0; i < _playOrder.Count; i++)
+            {
+                if (_playOrder[i] >= insertQueueIndex)
+                {
+                    _playOrder[i]++;
+                }
+            }
+
+            int insertOrderIndex = _orderIndex + 1;
+            if (insertOrderIndex > _playOrder.Count) insertOrderIndex = _playOrder.Count;
+            _playOrder.Insert(insertOrderIndex, insertQueueIndex);
+
+            _preloadedTrack = null;
         }
 
-        int insertOrderIndex = _orderIndex + 1;
-        if (insertOrderIndex > _playOrder.Count) insertOrderIndex = _playOrder.Count;
-        _playOrder.Insert(insertOrderIndex, insertQueueIndex);
-
-        _preloadedTrack = null;
         QueueChanged?.Invoke(this, EventArgs.Empty);
         RequestSaveState();
     }
@@ -891,22 +952,26 @@ public sealed class AudioPlayerService : IAudioPlayerService
     public void ReplaceUpcomingQueue(IEnumerable<Track> newUpcomingTracks)
     {
         var list = newUpcomingTracks.ToList();
-        if (_currentTrack == null)
+
+        lock (_queueLock)
         {
-            if (list.Count > 0)
+            if (_currentTrack == null)
             {
-                _ = PlayQueueAsync(list, 0);
+                if (list.Count > 0)
+                {
+                    _ = PlayQueueAsync(list, 0);
+                }
+                return;
             }
-            return;
+
+            _queue.Clear();
+            _queue.Add(_currentTrack);
+            _queue.AddRange(list);
+
+            _playOrder = Enumerable.Range(0, _queue.Count).ToList();
+            _orderIndex = 0;
+            _preloadedTrack = null;
         }
-
-        _queue.Clear();
-        _queue.Add(_currentTrack);
-        _queue.AddRange(list);
-
-        _playOrder = Enumerable.Range(0, _queue.Count).ToList();
-        _orderIndex = 0;
-        _preloadedTrack = null;
 
         QueueChanged?.Invoke(this, EventArgs.Empty);
         RequestSaveState();
@@ -914,18 +979,59 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     public void RemoveFromQueue(Track track)
     {
-        if (track == null || _queue.Count == 0 || _orderIndex < 0) return;
-        for (int i = _orderIndex + 1; i < _playOrder.Count; i++)
+        if (track == null) return;
+
+        bool removed = false;
+        lock (_queueLock)
         {
-            int qIdx = _playOrder[i];
-            if (qIdx >= 0 && qIdx < _queue.Count && Track.IsSameTrackId(_queue[qIdx].Id, track.Id))
+            if (_queue.Count == 0 || _orderIndex < 0) return;
+
+            int targetOrderIndex = -1;
+            int targetQueueIndex = -1;
+
+            for (int i = _orderIndex + 1; i < _playOrder.Count; i++)
             {
-                _playOrder.RemoveAt(i);
-                TriggerUpcomingTracksPreload();
-                RequestSaveState();
-                QueueChanged?.Invoke(this, EventArgs.Empty);
-                break;
+                int qIdx = _playOrder[i];
+                if (qIdx >= 0 && qIdx < _queue.Count && Track.IsSameTrackId(_queue[qIdx].Id, track.Id))
+                {
+                    targetOrderIndex = i;
+                    targetQueueIndex = qIdx;
+                    break;
+                }
             }
+
+            if (targetOrderIndex >= 0 && targetQueueIndex >= 0)
+            {
+                _playOrder.RemoveAt(targetOrderIndex);
+                _queue.RemoveAt(targetQueueIndex);
+
+                for (int k = 0; k < _playOrder.Count; k++)
+                {
+                    if (_playOrder[k] > targetQueueIndex)
+                    {
+                        _playOrder[k]--;
+                    }
+                }
+
+                if (_orderIndex >= _playOrder.Count)
+                {
+                    _orderIndex = Math.Max(0, _playOrder.Count - 1);
+                }
+
+                if (_preloadedTrack.HasValue && Track.IsSameTrackId(_preloadedTrack.Value.TrackId, track.Id))
+                {
+                    _preloadedTrack = null;
+                }
+
+                removed = true;
+            }
+        }
+
+        if (removed)
+        {
+            TriggerUpcomingTracksPreload();
+            RequestSaveState();
+            QueueChanged?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -1787,17 +1893,25 @@ public sealed class AudioPlayerService : IAudioPlayerService
             }
         }
 
-        // Instant local playback from LRU Audio Disk Cache (0 ms network latency)
-        if (!forceRefresh && _audioCacheService != null && _audioCacheService.TryGetCachedTrack(trackId, out var cachedPath, out var cachedQuality))
+        // Instant local playback from LRU Audio Disk Cache respecting preferred quality
+        if (!forceRefresh && _audioCacheService != null && 
+            _audioCacheService.TryGetCachedTrack(trackId, out var cachedPath, out var cachedQuality, preferredQuality: _settingsService.PreferredQuality))
         {
             return (cachedPath, cachedQuality);
         }
 
         var streamInfo = await _yandexMusicService.GetTrackStreamInfoAsync(trackId).ConfigureAwait(false);
-        if (!string.IsNullOrEmpty(streamInfo.Url) && _audioCacheService != null)
+        if (!string.IsNullOrEmpty(streamInfo.Url))
         {
-            // Non-blocking background caching to disk for subsequent instant replays
-            _audioCacheService.EnqueueDownload(trackId, streamInfo.Url, streamInfo.Quality);
+            // Non-blocking background caching to disk with upgrade support
+            _audioCacheService?.EnqueueDownload(trackId, streamInfo.Url, streamInfo.Quality);
+            return streamInfo;
+        }
+
+        // Graceful offline fallback: if network failed, check if we have any cached version
+        if (_audioCacheService != null && _audioCacheService.TryGetCachedTrack(trackId, out var fallbackPath, out var fallbackQuality))
+        {
+            return (fallbackPath, fallbackQuality);
         }
 
         return streamInfo;

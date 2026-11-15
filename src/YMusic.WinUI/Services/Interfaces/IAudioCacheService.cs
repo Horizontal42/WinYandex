@@ -9,8 +9,9 @@ public interface IAudioCacheService : IDisposable
     /// <summary>
     /// Checks if a track is available in local disk cache and returns its local file path and quality.
     /// If updateAccessTime is true, updates the track's LastAccessed timestamp for LRU ordering.
+    /// If preferredQuality is specified, validates that the cached track matches the desired quality (e.g. Lossless vs lossy).
     /// </summary>
-    bool TryGetCachedTrack(string trackId, out string? filePath, out StreamAudioQuality? quality, bool updateAccessTime = true);
+    bool TryGetCachedTrack(string trackId, out string? filePath, out StreamAudioQuality? quality, bool updateAccessTime = true, AudioQualityPreference? preferredQuality = null);
 
     /// <summary>
     /// Checks whether a track is currently cached on disk.

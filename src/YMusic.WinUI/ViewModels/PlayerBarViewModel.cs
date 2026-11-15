@@ -1157,10 +1157,16 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
         PositionSeconds = seconds;
     }
 
+    private bool _isReorderingFromUi;
+
     public void RefreshUpNextTracks()
     {
+        if (_isReorderingFromUi) return;
+
         RunOnUi(() =>
         {
+            if (_isReorderingFromUi) return;
+
             var queue = _audioPlayer.UpcomingQueue;
             UpNextCount = queue.Count;
             UpNextTracks.Clear();
@@ -1187,7 +1193,18 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
 
     public void ReorderUpcomingTrack(int oldIndex, int newIndex)
     {
-        _audioPlayer.ReorderUpcomingQueue(oldIndex, newIndex);
+        _isReorderingFromUi = true;
+        try
+        {
+            _audioPlayer.ReorderUpcomingQueue(oldIndex, newIndex);
+        }
+        finally
+        {
+            _ = Task.Delay(150).ContinueWith(_ =>
+            {
+                _isReorderingFromUi = false;
+            });
+        }
     }
 
     [RelayCommand]
@@ -1225,62 +1242,72 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
         IsQueueOpen = !IsQueueOpen;
     }
 
+    private bool _isLikeOperationInProgress;
+
     [RelayCommand]
     private async Task ToggleLikeAsync()
     {
-        if (CurrentTrack == null) return;
-
-        string trackId = CurrentTrack.Id;
-        var isEn = Loc?.CurrentLanguage == "en";
-
-        if (IsCurrentTrackDisliked)
-        {
-            IsCurrentTrackDisliked = false;
-            bool ok = await _musicService.UndislikeTrackAsync(trackId).ConfigureAwait(false);
-            if (!ok)
-            {
-                RunOnUi(() => IsCurrentTrackDisliked = true);
-            }
-            else
-            {
-                ShowToast(GetLocString("TrackToast_Undisliked", isEn ? "Removed from disliked" : "Удалено из «Не нравится»"));
-            }
-            return;
-        }
-
-        bool currentlyLiked = IsCurrentTrackLiked;
-        IsCurrentTrackLiked = !currentlyLiked;
+        if (CurrentTrack == null || _isLikeOperationInProgress) return;
+        _isLikeOperationInProgress = true;
 
         try
         {
-            if (!currentlyLiked)
+            string trackId = CurrentTrack.Id;
+            var isEn = Loc?.CurrentLanguage == "en";
+
+            if (IsCurrentTrackDisliked)
             {
-                bool ok = await _musicService.LikeTrackAsync(trackId).ConfigureAwait(false);
+                IsCurrentTrackDisliked = false;
+                bool ok = await _musicService.UndislikeTrackAsync(trackId).ConfigureAwait(false);
                 if (!ok)
                 {
-                    RunOnUi(() => IsCurrentTrackLiked = false);
+                    RunOnUi(() => IsCurrentTrackDisliked = true);
                 }
                 else
                 {
-                    ShowToast(GetLocString("TrackToast_Liked", isEn ? "Added to favorites" : "Добавлено в избранное"));
+                    ShowToast(GetLocString("TrackToast_Undisliked", isEn ? "Removed from disliked" : "Удалено из «Не нравится»"));
+                }
+                return;
+            }
+
+            bool currentlyLiked = IsCurrentTrackLiked;
+            IsCurrentTrackLiked = !currentlyLiked;
+
+            try
+            {
+                if (!currentlyLiked)
+                {
+                    bool ok = await _musicService.LikeTrackAsync(trackId).ConfigureAwait(false);
+                    if (!ok)
+                    {
+                        RunOnUi(() => IsCurrentTrackLiked = false);
+                    }
+                    else
+                    {
+                        ShowToast(GetLocString("TrackToast_Liked", isEn ? "Added to favorites" : "Добавлено в избранное"));
+                    }
+                }
+                else
+                {
+                    bool ok = await _musicService.UnlikeTrackAsync(trackId).ConfigureAwait(false);
+                    if (!ok)
+                    {
+                        RunOnUi(() => IsCurrentTrackLiked = true);
+                    }
+                    else
+                    {
+                        ShowToast(GetLocString("TrackToast_Unliked", isEn ? "Removed from favorites" : "Удалено из избранного"));
+                    }
                 }
             }
-            else
+            catch
             {
-                bool ok = await _musicService.UnlikeTrackAsync(trackId).ConfigureAwait(false);
-                if (!ok)
-                {
-                    RunOnUi(() => IsCurrentTrackLiked = true);
-                }
-                else
-                {
-                    ShowToast(GetLocString("TrackToast_Unliked", isEn ? "Removed from favorites" : "Удалено из избранного"));
-                }
+                RunOnUi(() => IsCurrentTrackLiked = currentlyLiked);
             }
         }
-        catch
+        finally
         {
-            RunOnUi(() => IsCurrentTrackLiked = currentlyLiked);
+            _isLikeOperationInProgress = false;
         }
     }
 
@@ -1801,17 +1828,31 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
         catch { }
     }
 
+    private CancellationTokenSource? _toastCts;
+
     public void ShowToast(string message)
     {
+        _toastCts?.Cancel();
+        _toastCts?.Dispose();
+        _toastCts = new CancellationTokenSource();
+        var token = _toastCts.Token;
+
         RunOnUi(() =>
         {
             ToastMessage = message;
             IsToastOpen = true;
         });
 
-        _ = Task.Delay(3000).ContinueWith(_ =>
+        _ = Task.Delay(3000, token).ContinueWith(t =>
         {
-            RunOnUi(() => IsToastOpen = false);
-        });
+            if (t.IsCanceled || token.IsCancellationRequested) return;
+            RunOnUi(() =>
+            {
+                if (!token.IsCancellationRequested)
+                {
+                    IsToastOpen = false;
+                }
+            });
+        }, TaskScheduler.Default);
     }
 }
