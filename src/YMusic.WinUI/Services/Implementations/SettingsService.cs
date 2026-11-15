@@ -458,6 +458,20 @@ public sealed class SettingsService : ISettingsService
         }
     }
 
+    public double LoudnessTargetLufs
+    {
+        get => _settings.LoudnessTargetLufs;
+        set
+        {
+            if (Math.Abs(_settings.LoudnessTargetLufs - value) > 0.01)
+            {
+                _settings.LoudnessTargetLufs = value;
+                Save();
+                NotifyChanged(nameof(LoudnessTargetLufs));
+            }
+        }
+    }
+
     public bool GlobalHotkeysEnabled
     {
         get => _settings.GlobalHotkeysEnabled;

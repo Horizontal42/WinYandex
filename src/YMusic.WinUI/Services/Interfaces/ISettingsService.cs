@@ -37,6 +37,7 @@ public interface ISettingsService
     bool CrossfadeEnabled { get; set; }
     int CrossfadeDurationSeconds { get; set; }
     bool LoudnessNormalizationEnabled { get; set; }
+    double LoudnessTargetLufs { get; set; }
 
     bool GlobalHotkeysEnabled { get; set; }
     bool GameOverlayEnabled { get; set; }

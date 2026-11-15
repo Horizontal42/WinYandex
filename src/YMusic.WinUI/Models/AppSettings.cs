@@ -97,6 +97,9 @@ public sealed class AppSettings
     [JsonPropertyName("loudnessNormalizationEnabled")]
     public bool LoudnessNormalizationEnabled { get; set; } = false;
 
+    [JsonPropertyName("loudnessTargetLufs")]
+    public double LoudnessTargetLufs { get; set; } = -14.0;
+
     [JsonPropertyName("globalHotkeysEnabled")]
     public bool GlobalHotkeysEnabled { get; set; } = true;
 

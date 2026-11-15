@@ -161,8 +161,17 @@ public sealed partial class ProfileViewModel : BaseViewModel
     [ObservableProperty]
     private bool _isLoudnessNormalizationEnabled;
 
+    [ObservableProperty]
+    private int _selectedLoudnessTargetIndex;
+
     public string LoudnessNormalizationTitle => IsRussian ? "Нормализация громкости" : "Loudness Normalization";
-    public string LoudnessNormalizationDesc => IsRussian ? "Выравнивание громкости треков до стандарта -14 LUFS (EBU R128 / ReplayGain)" : "Balances track loudness to standard -14 LUFS (EBU R128 / ReplayGain)";
+    public string LoudnessNormalizationDesc => IsRussian ? "Выравнивание громкости треков до единого уровня (EBU R128 / ReplayGain)" : "Balances track loudness to a consistent target (EBU R128 / ReplayGain)";
+    public string LoudnessTargetTitle => IsRussian ? "Целевой уровень громкости" : "Target Loudness Level";
+    public string LoudnessTargetDesc => IsRussian ? "Стандарт (-14 LUFS) сохраняет динамику, Громкий (-11 LUFS) делает звук плотнее" : "Standard (-14 LUFS) preserves dynamics, Loud (-11 LUFS) adds punch";
+
+    public List<string> LoudnessTargetOptions => IsRussian
+        ? new List<string> { "Стандартный (-14 LUFS)", "Громкий (-11 LUFS)", "Максимальный (-9 LUFS)" }
+        : new List<string> { "Standard (-14 LUFS)", "Loud (-11 LUFS)", "Maximum (-9 LUFS)" };
 
     public string ListeningStatsTitle => IsRussian ? "Статистика прослушивания" : "Listening Statistics";
     public string StatsTodayLabel => IsRussian ? "Сегодня" : "Today";
@@ -813,6 +822,12 @@ public sealed partial class ProfileViewModel : BaseViewModel
             IsCrossfadeEnabled = _settingsService.CrossfadeEnabled;
             CrossfadeDurationSeconds = _settingsService.CrossfadeDurationSeconds;
             IsLoudnessNormalizationEnabled = _settingsService.LoudnessNormalizationEnabled;
+            SelectedLoudnessTargetIndex = _settingsService.LoudnessTargetLufs switch
+            {
+                <= -13.0 => 0,
+                <= -10.0 => 1,
+                _ => 2
+            };
             IsGlobalHotkeysEnabled = _settingsService.GlobalHotkeysEnabled;
             IsGameOverlayEnabled = _settingsService.GameOverlayEnabled;
             IsShowOverlayOnTrackChangeEnabled = _settingsService.ShowOverlayOnTrackChange;
@@ -961,6 +976,15 @@ public sealed partial class ProfileViewModel : BaseViewModel
             else if (propName == nameof(ISettingsService.LoudnessNormalizationEnabled))
             {
                 IsLoudnessNormalizationEnabled = _settingsService.LoudnessNormalizationEnabled;
+            }
+            else if (propName == nameof(ISettingsService.LoudnessTargetLufs))
+            {
+                SelectedLoudnessTargetIndex = _settingsService.LoudnessTargetLufs switch
+                {
+                    <= -13.0 => 0,
+                    <= -10.0 => 1,
+                    _ => 2
+                };
             }
             else if (propName == nameof(ISettingsService.GlobalHotkeysEnabled))
             {
@@ -1205,6 +1229,17 @@ public sealed partial class ProfileViewModel : BaseViewModel
     {
         if (_isInitializingSettings) return;
         _settingsService.LoudnessNormalizationEnabled = value;
+    }
+
+    partial void OnSelectedLoudnessTargetIndexChanged(int value)
+    {
+        if (_isInitializingSettings) return;
+        _settingsService.LoudnessTargetLufs = value switch
+        {
+            1 => -11.0,
+            2 => -9.0,
+            _ => -14.0
+        };
     }
 
     public void RefreshStats()

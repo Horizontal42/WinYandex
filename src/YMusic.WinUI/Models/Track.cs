@@ -278,27 +278,32 @@ public sealed partial class Track : ObservableObject
     [JsonPropertyName("normalization")]
     public NormalizationMetadata? Normalization { get; set; }
 
-    public double CalculateNormalizationGain()
+    [JsonIgnore]
+    public string CleanId => Id?.Split(':')[0] ?? string.Empty;
+
+    public double CalculateNormalizationGain(double targetLufs = -14.0, double? measuredLufs = null)
     {
         double deltaDb = 0.0;
         if (R128 != null && R128.IntegratedLoudnessLufs != 0.0)
         {
-            // Target -14 LUFS standard
-            deltaDb = -14.0 - R128.IntegratedLoudnessLufs;
-            if (R128.TruePeakDbTp != 0.0)
-            {
-                // Ceiling protection against digital clipping
-                double maxGainDb = -1.0 - R128.TruePeakDbTp;
-                deltaDb = Math.Min(deltaDb, maxGainDb);
-            }
+            deltaDb = targetLufs - R128.IntegratedLoudnessLufs;
+        }
+        else if (measuredLufs.HasValue && measuredLufs.Value != 0.0)
+        {
+            deltaDb = targetLufs - measuredLufs.Value;
         }
         else if (Normalization != null && Normalization.GainDb != 0.0)
         {
-            deltaDb = Normalization.GainDb;
+            deltaDb = Normalization.GainDb + (targetLufs - (-14.0));
+        }
+        else
+        {
+            // Fallback for tracks without any metadata: assume typical modern mastering (-8.0 LUFS)
+            deltaDb = targetLufs - (-8.0);
         }
 
-        // Clamp between -12.0 dB (0.25x) and +6.0 dB (2.0x) to avoid extreme gain jumps
-        deltaDb = Math.Clamp(deltaDb, -12.0, 6.0);
+        // Clamp between -18.0 dB (0.125x) and +14.0 dB (5.0x) to avoid extreme anomalies
+        deltaDb = Math.Clamp(deltaDb, -18.0, 14.0);
         return Math.Pow(10.0, deltaDb / 20.0);
     }
 
