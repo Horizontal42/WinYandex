@@ -79,6 +79,21 @@ public static class Program
                 return false;
             }
 
+            if (existingProcesses.Count == 0)
+            {
+                try
+                {
+                    AppInstance.GetCurrent().UnregisterKey();
+                }
+                catch { }
+                mainInstance = AppInstance.FindOrRegisterForKey(InstanceKey);
+                if (mainInstance.IsCurrent)
+                {
+                    mainInstance.Activated += OnAppActivated;
+                    return false;
+                }
+            }
+
             // An instance is already running. Allow foreground activation and redirect.
             AllowSetForegroundWindow(ASFW_ANY);
             var redirectTask = mainInstance.RedirectActivationToAsync(args).AsTask();

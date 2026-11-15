@@ -9,8 +9,15 @@
     xmlns:vm="using:YMusic.WinUI.ViewModels"
     xmlns:helpers="using:YMusic.WinUI.Helpers"
     xmlns:controls="using:YMusic.WinUI.Views.Controls"
+    xmlns:converters="using:YMusic.WinUI.Converters"
     Loaded="UserControl_Loaded"
     mc:Ignorable="d">
+
+    <UserControl.Resources>
+        <converters:BoolToVisibilityConverter x:Key="BoolToVisibilityConverter" />
+        <converters:BoolToVisibilityConverter x:Key="InvertedBoolToVisibilityConverter" Invert="True" />
+        <converters:StringToImageSourceConverter x:Key="StringToImageSourceConverter" />
+    </UserControl.Resources>
 
     <Grid Height="88"
           Padding="16,4,16,6"
@@ -481,15 +488,9 @@
                                 <Setter Property="Padding" Value="14" />
                             </Style>
                         </Flyout.FlyoutPresenterStyle>
-                        <Grid RowSpacing="12">
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
-
+                        <StackPanel Width="360" Spacing="10">
                             <!-- Header: Title and Clear Button -->
-                            <Grid Grid.Row="0">
+                            <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*" />
                                     <ColumnDefinition Width="Auto" />
@@ -511,9 +512,8 @@
                             </Grid>
 
                             <!-- Currently Playing Mini Card -->
-                            <Border Grid.Row="1"
-                                    Visibility="{x:Bind ViewModel.HasTrack, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
-                                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                            <Border Visibility="{x:Bind ViewModel.HasTrack, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+                                    Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}"
                                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                     BorderThickness="1"
                                     CornerRadius="8"
@@ -546,64 +546,60 @@
                                 </Grid>
                             </Border>
 
-                            <!-- Up Next List -->
-                            <Grid Grid.Row="2">
-                                <TextBlock Text="{x:Bind ViewModel.QueueEmptyText, Mode=OneWay}"
-                                           HorizontalAlignment="Center"
-                                           VerticalAlignment="Center"
-                                           Foreground="{ThemeResource TextFillColorTertiaryBrush}"
-                                           FontSize="13"
-                                           Margin="0,20,0,20"
-                                           Visibility="{x:Bind ViewModel.HasUpNextTracks, Mode=OneWay, Converter={StaticResource InvertedBoolToVisibilityConverter}}" />
+                            <!-- Queue List or Empty Message -->
+                            <TextBlock Text="{x:Bind ViewModel.QueueEmptyText, Mode=OneWay}"
+                                       HorizontalAlignment="Center"
+                                       Foreground="{ThemeResource TextFillColorTertiaryBrush}"
+                                       FontSize="13"
+                                       Margin="0,12,0,12"
+                                       Visibility="{x:Bind ViewModel.HasUpNextTracks, Mode=OneWay, Converter={StaticResource InvertedBoolToVisibilityConverter}}" />
 
-                                <ListView ItemsSource="{x:Bind ViewModel.UpNextTracks, Mode=OneWay}"
-                                          Visibility="{x:Bind ViewModel.HasUpNextTracks, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
-                                          SelectionMode="None"
-                                          IsItemClickEnabled="True"
-                                          ItemClick="QueueListView_ItemClick"
-                                          MaxHeight="360">
-                                    <ListView.ItemTemplate>
-                                        <DataTemplate x:DataType="models:Track">
-                                            <Grid Margin="0,4" ColumnSpacing="10">
-                                                <Grid.ColumnDefinitions>
-                                                    <ColumnDefinition Width="34" />
-                                                    <ColumnDefinition Width="*" />
-                                                    <ColumnDefinition Width="Auto" />
-                                                </Grid.ColumnDefinitions>
-                                                <Border Width="34" Height="34" CornerRadius="4" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
-                                                    <Image Source="{x:Bind CoverUrl, Converter={StaticResource StringToImageSourceConverter}}"
-                                                           Stretch="UniformToFill" />
-                                                </Border>
-                                                <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                                                    <TextBlock Text="{x:Bind FullTitle}"
-                                                               FontSize="13"
-                                                               FontWeight="Normal"
-                                                               TextTrimming="CharacterEllipsis"
-                                                               MaxLines="1" />
-                                                    <TextBlock Text="{x:Bind ArtistNames}"
-                                                               FontSize="11"
-                                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                                               TextTrimming="CharacterEllipsis"
-                                                               MaxLines="1" />
-                                                </StackPanel>
-                                                <Button Grid.Column="2"
-                                                        Width="28"
-                                                        Height="28"
-                                                        Padding="0"
-                                                        CornerRadius="14"
-                                                        Background="Transparent"
-                                                        BorderBrush="Transparent"
-                                                        Click="RemoveFromQueueButton_Click"
-                                                        Tag="{x:Bind}"
-                                                        helpers:CursorHelper.UseHandCursor="True">
-                                                    <FontIcon Glyph="&#xE711;" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                </Button>
-                                            </Grid>
-                                        </DataTemplate>
-                                    </ListView.ItemTemplate>
-                                </ListView>
-                            </Grid>
-                        </Grid>
+                            <ListView ItemsSource="{x:Bind ViewModel.UpNextTracks, Mode=OneWay}"
+                                      Visibility="{x:Bind ViewModel.HasUpNextTracks, Mode=OneWay, Converter={StaticResource BoolToVisibilityConverter}}"
+                                      SelectionMode="None"
+                                      IsItemClickEnabled="True"
+                                      ItemClick="QueueListView_ItemClick"
+                                      MaxHeight="320">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate x:DataType="models:Track">
+                                        <Grid Margin="0,4" ColumnSpacing="10">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="34" />
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <Border Width="34" Height="34" CornerRadius="4" Background="{ThemeResource CardBackgroundFillColorSecondaryBrush}">
+                                                <Image Source="{x:Bind CoverUrl, Converter={StaticResource StringToImageSourceConverter}}"
+                                                       Stretch="UniformToFill" />
+                                            </Border>
+                                            <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                                <TextBlock Text="{x:Bind FullTitle}"
+                                                           FontSize="13"
+                                                           FontWeight="Normal"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           MaxLines="1" />
+                                                <TextBlock Text="{x:Bind ArtistNames}"
+                                                           FontSize="11"
+                                                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                           TextTrimming="CharacterEllipsis"
+                                                           MaxLines="1" />
+                                            </StackPanel>
+                                            <Button Grid.Column="2"
+                                                    Width="28"
+                                                    Height="28"
+                                                    Padding="0"
+                                                    CornerRadius="14"
+                                                    Background="Transparent"
+                                                    BorderBrush="Transparent"
+                                                    helpers:TrackMenuHelper.RemoveFromQueueButtonTrack="{x:Bind}"
+                                                    helpers:CursorHelper.UseHandCursor="True">
+                                                <FontIcon Glyph="&#xE711;" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            </Button>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
                     </Flyout>
                 </Button.Flyout>
             </Button>

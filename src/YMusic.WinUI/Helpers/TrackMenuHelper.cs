@@ -67,6 +67,43 @@ public static class TrackMenuHelper
         }
     }
 
+    public static readonly DependencyProperty RemoveFromQueueButtonTrackProperty =
+        DependencyProperty.RegisterAttached(
+            "RemoveFromQueueButtonTrack",
+            typeof(Track),
+            typeof(TrackMenuHelper),
+            new PropertyMetadata(null, OnRemoveFromQueueButtonTrackChanged));
+
+    public static Track? GetRemoveFromQueueButtonTrack(DependencyObject obj) => (Track?)obj.GetValue(RemoveFromQueueButtonTrackProperty);
+    public static void SetRemoveFromQueueButtonTrack(DependencyObject obj, Track? value) => obj.SetValue(RemoveFromQueueButtonTrackProperty, value);
+
+    private static void OnRemoveFromQueueButtonTrackChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        if (d is Button btn)
+        {
+            btn.Click -= RemoveFromQueue_Click;
+            if (e.NewValue is Track)
+            {
+                btn.Click += RemoveFromQueue_Click;
+            }
+        }
+    }
+
+    private static void RemoveFromQueue_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button btn)
+        {
+            var track = GetRemoveFromQueueButtonTrack(btn);
+            if (track != null)
+            {
+                var audioPlayer = App.GetService<IAudioPlayerService>();
+                var playerVm = App.GetService<PlayerBarViewModel>();
+                audioPlayer.RemoveFromQueue(track);
+                playerVm.RefreshUpNextTracks();
+            }
+        }
+    }
+
     private static void OnTrackChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
     {
         if (d is FrameworkElement element)
