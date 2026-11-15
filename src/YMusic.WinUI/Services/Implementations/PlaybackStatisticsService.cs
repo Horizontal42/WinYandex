@@ -54,6 +54,7 @@ public sealed class PlaybackStatisticsService : IPlaybackStatisticsService
     private string _currentSessionId = Guid.NewGuid().ToString("N");
     private readonly HashSet<string> _creditedTracksInSession = new(StringComparer.OrdinalIgnoreCase);
     private DateTime _lastProgressTimestamp = DateTime.UtcNow;
+    private double _accumulatedSeconds;
 
     public event EventHandler? StatisticsUpdated;
 
@@ -123,6 +124,7 @@ public sealed class PlaybackStatisticsService : IPlaybackStatisticsService
         }
 
         string todayKey = DateTime.Now.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        bool shouldNotify = false;
 
         lock (_lock)
         {
@@ -132,9 +134,11 @@ public sealed class PlaybackStatisticsService : IPlaybackStatisticsService
                 _storage.DailyStats[todayKey] = todayRecord;
             }
 
-            long addedSeconds = (long)Math.Round(elapsedSeconds);
+            _accumulatedSeconds += elapsedSeconds;
+            long addedSeconds = (long)_accumulatedSeconds;
             if (addedSeconds > 0)
             {
+                _accumulatedSeconds -= addedSeconds;
                 todayRecord.ListeningSeconds += addedSeconds;
                 _storage.TotalListeningSeconds += addedSeconds;
                 _isDirty = true;
@@ -158,7 +162,12 @@ public sealed class PlaybackStatisticsService : IPlaybackStatisticsService
                 todayRecord.TracksCount++;
                 _storage.TotalTracksPlayed++;
                 _isDirty = true;
-                StatisticsUpdated?.Invoke(this, EventArgs.Empty);
+                shouldNotify = true;
+            }
+
+            if (_creditedTracksInSession.Count > 2000)
+            {
+                _creditedTracksInSession.Clear();
             }
 
             if (_isDirty)
@@ -166,6 +175,11 @@ public sealed class PlaybackStatisticsService : IPlaybackStatisticsService
                 _debounceSaveTimer.Stop();
                 _debounceSaveTimer.Start();
             }
+        }
+
+        if (shouldNotify)
+        {
+            StatisticsUpdated?.Invoke(this, EventArgs.Empty);
         }
     }
 

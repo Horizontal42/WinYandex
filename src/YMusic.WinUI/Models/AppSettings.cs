@@ -152,4 +152,20 @@ public sealed class AppSettings
 
     [JsonPropertyName("showChartOnHome")]
     public bool ShowChartOnHome { get; set; } = true;
+
+    // Window geometry
+    [JsonPropertyName("windowWidth")]
+    public int WindowWidth { get; set; } = 1180;
+
+    [JsonPropertyName("windowHeight")]
+    public int WindowHeight { get; set; } = 780;
+
+    [JsonPropertyName("windowPositionX")]
+    public int? WindowPositionX { get; set; }
+
+    [JsonPropertyName("windowPositionY")]
+    public int? WindowPositionY { get; set; }
+
+    [JsonPropertyName("isWindowMaximized")]
+    public bool IsWindowMaximized { get; set; } = false;
 }

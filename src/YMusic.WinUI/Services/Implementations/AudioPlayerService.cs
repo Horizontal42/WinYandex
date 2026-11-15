@@ -56,6 +56,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
     private DateTime _lastPeriodicSaveTime = DateTime.UtcNow;
     private readonly object _saveLock = new();
     private readonly object _saveTimerLock = new();
+    private readonly object _queueLock = new();
     private System.Threading.Timer? _debouncedSaveTimer;
     private int _consecutivePlaybackFailures = 0;
 
@@ -165,17 +166,20 @@ public sealed class AudioPlayerService : IAudioPlayerService
     {
         get
         {
-            if (_orderIndex < 0 || _orderIndex >= _playOrder.Count) return Array.Empty<Track>();
-            var list = new List<Track>();
-            for (int i = _orderIndex + 1; i < _playOrder.Count; i++)
+            lock (_queueLock)
             {
-                int trackIdx = _playOrder[i];
-                if (trackIdx >= 0 && trackIdx < _queue.Count)
+                if (_orderIndex < 0 || _orderIndex >= _playOrder.Count) return Array.Empty<Track>();
+                var list = new List<Track>();
+                for (int i = _orderIndex + 1; i < _playOrder.Count; i++)
                 {
-                    list.Add(_queue[trackIdx]);
+                    int trackIdx = _playOrder[i];
+                    if (trackIdx >= 0 && trackIdx < _queue.Count)
+                    {
+                        list.Add(_queue[trackIdx]);
+                    }
                 }
+                return list.AsReadOnly();
             }
-            return list.AsReadOnly();
         }
     }
 
@@ -183,18 +187,21 @@ public sealed class AudioPlayerService : IAudioPlayerService
     {
         get
         {
-            if (_orderIndex <= 0 || _playOrder.Count == 0 || _queue.Count == 0) return Array.Empty<Track>();
-            int count = Math.Min(_orderIndex, _playOrder.Count);
-            var list = new List<Track>(count);
-            for (int i = 0; i < count; i++)
+            lock (_queueLock)
             {
-                int trackIdx = _playOrder[i];
-                if (trackIdx >= 0 && trackIdx < _queue.Count)
+                if (_orderIndex <= 0 || _playOrder.Count == 0 || _queue.Count == 0) return Array.Empty<Track>();
+                int count = Math.Min(_orderIndex, _playOrder.Count);
+                var list = new List<Track>(count);
+                for (int i = 0; i < count; i++)
                 {
-                    list.Add(_queue[trackIdx]);
+                    int trackIdx = _playOrder[i];
+                    if (trackIdx >= 0 && trackIdx < _queue.Count)
+                    {
+                        list.Add(_queue[trackIdx]);
+                    }
                 }
+                return list.AsReadOnly();
             }
-            return list.AsReadOnly();
         }
     }
 
@@ -850,18 +857,28 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     public void ReorderUpcomingQueue(int oldIndex, int newIndex)
     {
-        if (_orderIndex < 0 || _orderIndex >= _playOrder.Count) return;
-        int upcomingStart = _orderIndex + 1;
-        int from = upcomingStart + oldIndex;
-        int to = upcomingStart + newIndex;
-
-        if (from >= upcomingStart && from < _playOrder.Count &&
-            to >= upcomingStart && to < _playOrder.Count && from != to)
+        bool changed = false;
+        lock (_queueLock)
         {
-            int moved = _playOrder[from];
-            _playOrder.RemoveAt(from);
-            _playOrder.Insert(to, moved);
+            if (_orderIndex >= 0 && _orderIndex < _playOrder.Count)
+            {
+                int upcomingStart = _orderIndex + 1;
+                int from = upcomingStart + oldIndex;
+                int to = upcomingStart + newIndex;
 
+                if (from >= upcomingStart && from < _playOrder.Count &&
+                    to >= upcomingStart && to < _playOrder.Count && from != to)
+                {
+                    int moved = _playOrder[from];
+                    _playOrder.RemoveAt(from);
+                    _playOrder.Insert(to, moved);
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed)
+        {
             TriggerUpcomingTracksPreload();
             RequestSaveState();
             QueueChanged?.Invoke(this, EventArgs.Empty);
@@ -1416,7 +1433,8 @@ public sealed class AudioPlayerService : IAudioPlayerService
         {
             try
             {
-                _currentInputNode.OutgoingGain = 1.0;
+                double normGain = _settingsService.LoudnessNormalizationEnabled ? (_currentTrack?.CalculateNormalizationGain() ?? 1.0) : 1.0;
+                _currentInputNode.OutgoingGain = normGain;
             }
             catch { }
         }

@@ -47,7 +47,44 @@ public sealed partial class ShellWindow : Window
             AppWindow.SetIcon("Assets/AppIcon.ico");
         }
 
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 780));
+        var settings = App.GetService<ISettingsService>();
+        if (settings != null)
+        {
+            int width = Math.Max(settings.WindowWidth, 900);
+            int height = Math.Max(settings.WindowHeight, 600);
+            AppWindow.Resize(new Windows.Graphics.SizeInt32(width, height));
+
+            if (settings.WindowPositionX.HasValue && settings.WindowPositionY.HasValue)
+            {
+                var pt = new Windows.Graphics.PointInt32(settings.WindowPositionX.Value, settings.WindowPositionY.Value);
+                try
+                {
+                    var displayArea = Microsoft.UI.Windowing.DisplayArea.GetFromPoint(pt, Microsoft.UI.Windowing.DisplayAreaFallback.Nearest);
+                    if (displayArea != null)
+                    {
+                        AppWindow.Move(pt);
+                    }
+                }
+                catch { }
+            }
+
+            if (settings.IsWindowMaximized && AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+            {
+                presenter.Maximize();
+            }
+        }
+        else
+        {
+            AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 780));
+        }
+
+        AppWindow.Changed += (s, args) =>
+        {
+            if (args.DidPositionChange || args.DidSizeChange || args.DidPresenterChange)
+            {
+                SaveCurrentWindowPlacement();
+            }
+        };
 
         if (Content is FrameworkElement rootElement)
         {
@@ -230,6 +267,7 @@ public sealed partial class ShellWindow : Window
 
         AppWindow.Closing += (sender, args) =>
         {
+            SaveCurrentWindowPlacement();
             if (!trayService.IsExplicitExit && settingsService.MinimizeToTrayOnClose)
             {
                 args.Cancel = true;
@@ -893,5 +931,34 @@ public sealed partial class ShellWindow : Window
     private void CloseThemePreview_Click(object sender, RoutedEventArgs e)
     {
         ViewModel.CloseThemePreview();
+    }
+
+    private void SaveCurrentWindowPlacement()
+    {
+        try
+        {
+            var settings = App.GetService<ISettingsService>();
+            if (settings == null) return;
+
+            if (AppWindow.Presenter is Microsoft.UI.Windowing.OverlappedPresenter presenter)
+            {
+                if (presenter.State == Microsoft.UI.Windowing.OverlappedPresenterState.Maximized)
+                {
+                    settings.IsWindowMaximized = true;
+                    return;
+                }
+                if (presenter.State == Microsoft.UI.Windowing.OverlappedPresenterState.Minimized)
+                {
+                    return;
+                }
+            }
+
+            int w = AppWindow.Size.Width;
+            int h = AppWindow.Size.Height;
+            int x = AppWindow.Position.X;
+            int y = AppWindow.Position.Y;
+            settings.SaveWindowPlacement(w, h, x, y, false);
+        }
+        catch { }
     }
 }
