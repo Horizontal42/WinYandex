@@ -10,7 +10,6 @@ public sealed partial class Track : ObservableObject
 {
     [ObservableProperty]
     [property: JsonIgnore]
-    [NotifyPropertyChangedFor(nameof(IsActiveOrHighlighted))]
     private bool _isCurrent;
 
     [ObservableProperty]
@@ -67,13 +66,6 @@ public sealed partial class Track : ObservableObject
     [property: JsonIgnore]
     private bool _isCached;
 
-    [ObservableProperty]
-    [property: JsonIgnore]
-    [NotifyPropertyChangedFor(nameof(IsActiveOrHighlighted))]
-    private bool _isHighlighted;
-
-    [JsonIgnore]
-    public bool IsActiveOrHighlighted => IsCurrent || IsHighlighted;
 
     [JsonIgnore]
     public static Func<string, bool>? IsTrackReplacedChecker { get; set; }

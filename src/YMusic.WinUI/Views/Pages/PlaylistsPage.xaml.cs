@@ -564,24 +564,37 @@ public sealed partial class PlaylistsPage : Page
         if (string.IsNullOrWhiteSpace(trackId)) return;
         DispatcherQueue.TryEnqueue(async () =>
         {
-            for (int retry = 0; retry < 6; retry++)
+            for (int retry = 0; retry < 5; retry++)
             {
                 var target = ViewModel.SelectedPlaylistTracks.FirstOrDefault(t => Track.IsSameTrackId(t.Id, trackId));
                 if (target != null)
                 {
                     TracksListView?.ScrollIntoView(target);
-                    target.IsHighlighted = true;
-                    _ = Task.Delay(2500).ContinueWith(_ => DispatcherQueue.TryEnqueue(() => target.IsHighlighted = false));
                     return;
                 }
-                await Task.Delay(120);
+                await Task.Delay(100);
             }
         });
     }
 
+    private async void TrackTitle_Click(object sender, RoutedEventArgs e)
+    {
+        if (ViewModel.IsDetailOpen && ViewModel.SelectedCategoryIndex == 1)
+        {
+            // Already inside album detail: play track
+            if (sender is FrameworkElement elem && elem.Tag is Track trk)
+            {
+                await ViewModel.PlayTrackCommand.ExecuteAsync(trk);
+            }
+            return;
+        }
+
+        TrackAlbum_Click(sender, e);
+    }
+
     private async void TrackAlbum_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is HyperlinkButton button && button.Tag is Track track)
+        if (sender is FrameworkElement button && button.Tag is Track track)
         {
             var album = track.Albums?.FirstOrDefault();
             if (album != null && album.Id > 0)
