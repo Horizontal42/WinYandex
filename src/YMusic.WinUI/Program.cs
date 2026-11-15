@@ -51,12 +51,12 @@ public static class Program
                 .Where(p => p.Id != currentProcess.Id)
                 .ToList();
 
-            // 1. Clean up any dead/hung zombie processes if they are not responding
+            // 1. Clean up dead/hung zombie processes only if they are not responding AND have been running for at least 30 seconds
             foreach (var proc in existingProcesses)
             {
                 try
                 {
-                    if (!proc.Responding)
+                    if (!proc.Responding && (DateTime.Now - proc.StartTime).TotalSeconds > 30)
                     {
                         Debug.WriteLine($"[Program] Killing hung zombie process {proc.Id}...");
                         proc.Kill();

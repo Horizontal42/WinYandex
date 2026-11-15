@@ -46,6 +46,35 @@ public partial class App : Application
             catch { }
             e.Handled = true;
         };
+
+        AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+        {
+            string msg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CRITICAL AppDomain.UnhandledException]: {e.ExceptionObject}\n";
+            System.Diagnostics.Debug.WriteLine(msg);
+            try
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string dir = System.IO.Path.Combine(appData, "YMusic");
+                System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "app_debug.log"), msg);
+            }
+            catch { }
+        };
+
+        TaskScheduler.UnobservedTaskException += (sender, e) =>
+        {
+            string msg = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [CRITICAL UnobservedTaskException]: {e.Exception?.Message}\n{e.Exception}\n";
+            System.Diagnostics.Debug.WriteLine(msg);
+            try
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string dir = System.IO.Path.Combine(appData, "YMusic");
+                System.IO.Directory.CreateDirectory(dir);
+                System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "app_debug.log"), msg);
+            }
+            catch { }
+            e.SetObserved();
+        };
     }
 
     private static IServiceProvider ConfigureServices()
