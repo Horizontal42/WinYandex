@@ -777,6 +777,8 @@ public sealed class SettingsService : ISettingsService
         }
     }
 
+    private System.Threading.Timer? _windowPlacementDebounceTimer;
+
     public void SaveWindowPlacement(int width, int height, int? x, int? y, bool isMaximized)
     {
         bool changed = false;
@@ -804,7 +806,8 @@ public sealed class SettingsService : ISettingsService
 
         if (changed)
         {
-            Save();
+            _windowPlacementDebounceTimer ??= new System.Threading.Timer(_ => Save(), null, Timeout.Infinite, Timeout.Infinite);
+            _windowPlacementDebounceTimer.Change(1000, Timeout.Infinite);
         }
     }
 

@@ -130,17 +130,31 @@ public sealed partial class PlayerBarControl : UserControl
 
     private async void QueueListView_ItemClick(object sender, ItemClickEventArgs e)
     {
-        if (e.ClickedItem is YMusic.WinUI.Models.Track track)
+        try
         {
-            await ViewModel.PlayQueueTrackCommand.ExecuteAsync(track);
+            if (e.ClickedItem is YMusic.WinUI.Models.Track track)
+            {
+                await ViewModel.PlayQueueTrackCommand.ExecuteAsync(track);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[PlayerBar] QueueListView_ItemClick error: {ex.Message}");
         }
     }
 
     private async void PlayedQueueListView_ItemClick(object sender, ItemClickEventArgs e)
     {
-        if (e.ClickedItem is YMusic.WinUI.Models.Track track)
+        try
         {
-            await ViewModel.PlayPlayedTrackCommand.ExecuteAsync(track);
+            if (e.ClickedItem is YMusic.WinUI.Models.Track track)
+            {
+                await ViewModel.PlayPlayedTrackCommand.ExecuteAsync(track);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[PlayerBar] PlayedQueueListView_ItemClick error: {ex.Message}");
         }
     }
 

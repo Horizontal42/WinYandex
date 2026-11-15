@@ -1162,20 +1162,22 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
         RunOnUi(() =>
         {
             var queue = _audioPlayer.UpcomingQueue;
+            UpNextCount = queue.Count;
             UpNextTracks.Clear();
-            foreach (var t in queue)
+            var nextItems = queue.Count > 100 ? queue.Take(100) : queue;
+            foreach (var t in nextItems)
             {
                 UpNextTracks.Add(t);
             }
-            UpNextCount = queue.Count;
 
             var played = _audioPlayer.PlayedQueue;
+            PlayedTracksCount = played.Count;
             PlayedTracks.Clear();
-            foreach (var p in played)
+            var recentPlayed = played.Count > 50 ? played.Skip(played.Count - 50) : played;
+            foreach (var p in recentPlayed)
             {
                 PlayedTracks.Add(p);
             }
-            PlayedTracksCount = played.Count;
 
             OnPropertyChanged(nameof(QueueHeaderText));
             OnPropertyChanged(nameof(UpNextLabelText));

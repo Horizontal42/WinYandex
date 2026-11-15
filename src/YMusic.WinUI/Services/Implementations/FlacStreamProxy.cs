@@ -28,35 +28,78 @@ public sealed class FlacStreamProxy : IFlacStreamProxy
 
     public FlacStreamProxy()
     {
-        _httpClient = new HttpClient(new SocketsHttpHandler
+        _httpClient = new HttpClient(YandexBypassProxy.CreateHandler(TimeSpan.FromSeconds(15), TimeSpan.FromMinutes(15)))
         {
-            PooledConnectionLifetime = TimeSpan.FromMinutes(10),
-            AutomaticDecompression = DecompressionMethods.None
-        });
+            Timeout = TimeSpan.FromMinutes(5)
+        };
 
-        _listener = new HttpListener();
+        int port = 0;
+        HttpListener? listener = null;
+        for (int retry = 0; retry < 5; retry++)
+        {
+            try
+            {
+                var tcpListener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+                tcpListener.Start();
+                port = ((IPEndPoint)tcpListener.LocalEndpoint).Port;
+                tcpListener.Stop();
 
-        // Pick a free local port
-        var tcpListener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-        tcpListener.Start();
-        _port = ((IPEndPoint)tcpListener.LocalEndpoint).Port;
-        tcpListener.Stop();
+                listener = new HttpListener();
+                listener.Prefixes.Add($"http://127.0.0.1:{port}/flac/");
+                listener.Start();
+                break;
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[FlacStreamProxy] Port {port} binding failed, retrying: {ex.Message}");
+                try { listener?.Close(); } catch { }
+                listener = null;
+            }
+        }
 
-        _listener.Prefixes.Add($"http://127.0.0.1:{_port}/flac/");
-        _listener.Start();
+        _port = port;
+        _listener = listener ?? new HttpListener();
+        if (!_listener.IsListening)
+        {
+            try
+            {
+                _listener.Prefixes.Add($"http://127.0.0.1:{_port}/flac/");
+                _listener.Start();
+            }
+            catch { }
+        }
 
         Task.Run(() => ListenLoopAsync(_cts.Token));
     }
 
     public string RegisterStream(string trackId, string cdnUrl, byte[] keyBytes)
     {
+        // Prune stale stream metadata to prevent memory leak
+        if (_activeStreams.Count > 40)
+        {
+            var cutoff = DateTime.UtcNow.AddHours(-1);
+            foreach (var kvp in _activeStreams)
+            {
+                if (kvp.Value.CreatedAt < cutoff || _activeStreams.Count > 50)
+                {
+                    if (_activeStreams.TryRemove(kvp.Key, out var oldMeta))
+                    {
+                        try { System.Security.Cryptography.CryptographicOperations.ZeroMemory(oldMeta.Key); } catch { }
+                    }
+                }
+            }
+        }
+
         _activeStreams[trackId] = new StreamMetadata(cdnUrl, keyBytes, DateTime.UtcNow);
         return $"http://127.0.0.1:{_port}/flac/{trackId}";
     }
 
     public void UnregisterStream(string trackId)
     {
-        _activeStreams.TryRemove(trackId, out _);
+        if (_activeStreams.TryRemove(trackId, out var meta))
+        {
+            try { System.Security.Cryptography.CryptographicOperations.ZeroMemory(meta.Key); } catch { }
+        }
     }
 
     private async Task ListenLoopAsync(CancellationToken ct)
@@ -84,6 +127,13 @@ public sealed class FlacStreamProxy : IFlacStreamProxy
         var response = context.Response;
         try
         {
+            if (!context.Request.IsLocal)
+            {
+                response.StatusCode = (int)HttpStatusCode.Forbidden;
+                response.Close();
+                return;
+            }
+
             string path = context.Request.Url?.AbsolutePath ?? string.Empty;
             // Expected path: /flac/{trackId}
             string trackId = path.TrimStart('/').Replace("flac/", "");
@@ -177,6 +227,12 @@ public sealed class FlacStreamProxy : IFlacStreamProxy
             _listener.Close();
             _httpClient.Dispose();
             _cts.Dispose();
+
+            foreach (var meta in _activeStreams.Values)
+            {
+                try { System.Security.Cryptography.CryptographicOperations.ZeroMemory(meta.Key); } catch { }
+            }
+            _activeStreams.Clear();
         }
         catch { }
     }

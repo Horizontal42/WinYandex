@@ -156,6 +156,7 @@ public partial class App : Application
         {
             try
             {
+                provider.GetService<IPlaybackStatisticsService>()?.Dispose();
                 provider.GetService<IDiscordRpcService>()?.Dispose();
                 provider.GetService<IObsOverlayService>()?.Dispose();
                 provider.GetService<IGameOverlayService>()?.Dispose();

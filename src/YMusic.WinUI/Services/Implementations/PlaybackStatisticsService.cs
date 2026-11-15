@@ -48,6 +48,7 @@ public sealed class PlaybackStatisticsService : IPlaybackStatisticsService
     private readonly System.Timers.Timer _debounceSaveTimer;
     private bool _isDirty;
     private bool _disposed;
+    private DateTime _lastFlushTime = DateTime.UtcNow;
 
     // Session tracking to prevent duplicate counting
     private string? _currentActiveTrackId;
@@ -172,8 +173,15 @@ public sealed class PlaybackStatisticsService : IPlaybackStatisticsService
 
             if (_isDirty)
             {
-                _debounceSaveTimer.Stop();
-                _debounceSaveTimer.Start();
+                if ((DateTime.UtcNow - _lastFlushTime).TotalSeconds >= 30)
+                {
+                    _debounceSaveTimer.Stop();
+                    FlushIfDirty();
+                }
+                else if (!_debounceSaveTimer.Enabled)
+                {
+                    _debounceSaveTimer.Start();
+                }
             }
         }
 
@@ -323,6 +331,7 @@ public sealed class PlaybackStatisticsService : IPlaybackStatisticsService
         {
             if (!_isDirty) return;
             _isDirty = false;
+            _lastFlushTime = DateTime.UtcNow;
 
             try
             {

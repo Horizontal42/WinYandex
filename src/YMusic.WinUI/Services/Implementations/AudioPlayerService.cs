@@ -68,14 +68,25 @@ public sealed class AudioPlayerService : IAudioPlayerService
     {
         get
         {
-            if (_currentInputNode != null)
+            try
             {
-                return _currentInputNode.Position;
+                if (_currentInputNode != null)
+                {
+                    return _currentInputNode.Position;
+                }
             }
-            if (_mediaPlayer.PlaybackSession.Position > TimeSpan.Zero)
+            catch (ObjectDisposedException) { }
+            catch (Exception) { }
+
+            try
             {
-                return _mediaPlayer.PlaybackSession.Position;
+                if (_mediaPlayer.PlaybackSession.Position > TimeSpan.Zero)
+                {
+                    return _mediaPlayer.PlaybackSession.Position;
+                }
             }
+            catch { }
+
             return _restoredPosition;
         }
     }
@@ -84,15 +95,28 @@ public sealed class AudioPlayerService : IAudioPlayerService
     {
         get
         {
-            if (_currentInputNode != null)
+            try
             {
-                return _currentInputNode.Duration;
+                if (_currentInputNode != null)
+                {
+                    return _currentInputNode.Duration;
+                }
             }
+            catch (ObjectDisposedException) { }
+            catch (Exception) { }
+
             if (_currentTrack != null && _currentTrack.Duration > TimeSpan.Zero)
             {
                 return _currentTrack.Duration;
             }
-            return _mediaPlayer.PlaybackSession.NaturalDuration;
+            try
+            {
+                return _mediaPlayer.PlaybackSession.NaturalDuration;
+            }
+            catch
+            {
+                return TimeSpan.Zero;
+            }
         }
     }
 
@@ -356,29 +380,36 @@ public sealed class AudioPlayerService : IAudioPlayerService
         _positionTimer = new System.Timers.Timer(250);
         _positionTimer.Elapsed += (_, _) =>
         {
-            if (_isPlaying)
+            try
             {
-                var pos = Position;
-                PositionChanged?.Invoke(this, pos);
-                CheckPreloadNextTrack(pos);
-                CheckCrossfade(pos);
-
-                var dur = Duration;
-                _statisticsService?.RecordProgress(_currentTrack?.Id ?? string.Empty, pos, dur, _isPlaying);
-                if (dur > TimeSpan.Zero && (_currentTrack == null || _currentTrack.DurationMs <= 0))
+                if (_isPlaying && !_isDisposed)
                 {
-                    if (_currentTrack != null)
+                    var pos = Position;
+                    PositionChanged?.Invoke(this, pos);
+                    CheckPreloadNextTrack(pos);
+                    CheckCrossfade(pos);
+
+                    var dur = Duration;
+                    _statisticsService?.RecordProgress(_currentTrack?.Id ?? string.Empty, pos, dur, _isPlaying);
+                    if (dur > TimeSpan.Zero && (_currentTrack == null || _currentTrack.DurationMs <= 0))
                     {
-                        _currentTrack.DurationMs = (long)dur.TotalMilliseconds;
+                        if (_currentTrack != null)
+                        {
+                            _currentTrack.DurationMs = (long)dur.TotalMilliseconds;
+                        }
+                        DurationChanged?.Invoke(this, dur);
                     }
-                    DurationChanged?.Invoke(this, dur);
-                }
 
-                if ((DateTime.UtcNow - _lastPeriodicSaveTime).TotalSeconds >= 3.0)
-                {
-                    _lastPeriodicSaveTime = DateTime.UtcNow;
-                    RequestSaveState();
+                    if ((DateTime.UtcNow - _lastPeriodicSaveTime).TotalSeconds >= 3.0)
+                    {
+                        _lastPeriodicSaveTime = DateTime.UtcNow;
+                        RequestSaveState();
+                    }
                 }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[AudioPlayer] Timer error: {ex.Message}");
             }
         };
 

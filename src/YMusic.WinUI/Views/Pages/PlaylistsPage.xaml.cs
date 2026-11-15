@@ -594,21 +594,28 @@ public sealed partial class PlaylistsPage : Page
 
     private async void TrackAlbum_Click(object sender, RoutedEventArgs e)
     {
-        if (sender is FrameworkElement button && button.Tag is Track track)
+        try
         {
-            var album = track.Albums?.FirstOrDefault();
-            if (album != null && album.Id > 0)
+            if (sender is FrameworkElement button && button.Tag is Track track)
             {
-                await App.GetService<YMusic.WinUI.Services.Interfaces.INavigationService>().NavigateToAlbumAsync(album, false, track.Id);
-            }
-            else if (!string.IsNullOrEmpty(track.Id) && track.Id.Contains(':'))
-            {
-                var parts = track.Id.Split(':');
-                if (parts.Length > 1 && long.TryParse(parts[1], out long albumId) && albumId > 0)
+                var album = track.Albums?.FirstOrDefault();
+                if (album != null && album.Id > 0)
                 {
-                    await App.GetService<YMusic.WinUI.Services.Interfaces.INavigationService>().NavigateToAlbumByIdAsync(albumId, track.AlbumTitle, track.Id);
+                    await App.GetService<YMusic.WinUI.Services.Interfaces.INavigationService>().NavigateToAlbumAsync(album, false, track.Id);
+                }
+                else if (!string.IsNullOrEmpty(track.Id) && track.Id.Contains(':'))
+                {
+                    var parts = track.Id.Split(':');
+                    if (parts.Length > 1 && long.TryParse(parts[1], out long albumId) && albumId > 0)
+                    {
+                        await App.GetService<YMusic.WinUI.Services.Interfaces.INavigationService>().NavigateToAlbumByIdAsync(albumId, track.AlbumTitle, track.Id);
+                    }
                 }
             }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"[Playlists] TrackAlbum_Click error: {ex.Message}");
         }
     }
 

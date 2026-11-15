@@ -268,6 +268,7 @@ public sealed partial class ShellWindow : Window
         AppWindow.Closing += (sender, args) =>
         {
             SaveCurrentWindowPlacement();
+            settingsService.Save();
             if (!trayService.IsExplicitExit && settingsService.MinimizeToTrayOnClose)
             {
                 args.Cancel = true;
