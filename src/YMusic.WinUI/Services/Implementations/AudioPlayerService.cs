@@ -1819,6 +1819,11 @@ public sealed class AudioPlayerService : IAudioPlayerService
         UpdateSmtcMetadata(track);
         RequestSaveState();
 
+        if (_currentPlaybackMode == PlaybackMode.Wave && track != null)
+        {
+            _yandexMusicService.RecordPlayedWaveTrack(track);
+        }
+
         if (_sloplessService != null && _settingsService.SloplessEnabled)
         {
             _ = HandleSloplessAiCheckAsync(track, requestId);

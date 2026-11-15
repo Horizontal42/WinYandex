@@ -58,6 +58,10 @@ public sealed partial class YandexMusicService : IYandexMusicService
     private IReadOnlyList<Track>? _cachedLikedTracks;
     private DateTime _lastLikedTracksCacheTime = DateTime.MinValue;
     private readonly SemaphoreSlim _likedTracksLock = new(1, 1);
+    private readonly ConcurrentDictionary<string, Track> _recordedWaveTracks = new(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<Track>? _cachedWaveHistoryTracks;
+    private DateTime _lastWaveHistoryCacheTime = DateTime.MinValue;
+    private readonly SemaphoreSlim _waveHistoryLock = new(1, 1);
 
     public event EventHandler? UnauthorizedResponseReceived;
     public event EventHandler? RegionRestrictionDetected;
@@ -324,6 +328,13 @@ public sealed partial class YandexMusicService : IYandexMusicService
             var ids = await GetLikedTrackIdsAsync(userId, cancellationToken).ConfigureAwait(false);
             if (ids == null || ids.Count == 0) return Array.Empty<Track>();
             var tracks = await GetTracksAsync(ids, cancellationToken).ConfigureAwait(false);
+            foreach (var t in tracks)
+            {
+                if (t != null)
+                {
+                    t.IsLiked = true;
+                }
+            }
             _cachedLikedTracks = tracks;
             _lastLikedTracksCacheTime = DateTime.UtcNow;
             return tracks;
@@ -698,9 +709,13 @@ public sealed partial class YandexMusicService : IYandexMusicService
             {
                 foreach (var track in apiResult.Result)
                 {
-                    if (track != null && string.IsNullOrWhiteSpace(track.AddedAt) && _likedTrackTimestamps.TryGetValue(track.Id, out var ts))
+                    if (track != null)
                     {
-                        track.AddedAt = ts;
+                        if (string.IsNullOrWhiteSpace(track.AddedAt) && _likedTrackTimestamps.TryGetValue(track.Id, out var ts))
+                        {
+                            track.AddedAt = ts;
+                        }
+                        track.IsLiked = IsTrackLiked(track.Id);
                     }
                 }
                 allTracks.AddRange(apiResult.Result);
@@ -2174,6 +2189,206 @@ public sealed partial class YandexMusicService : IYandexMusicService
         var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
         using var response = await SendRequestAsync(HttpMethod.Post, endpoint, content, cancellationToken).ConfigureAwait(false);
+    }
+
+    public void RecordPlayedWaveTrack(Track track)
+    {
+        if (track == null || string.IsNullOrWhiteSpace(track.Id)) return;
+        _recordedWaveTracks[track.Id] = track;
+
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string dir = Path.Combine(appData, "YMusic");
+                Directory.CreateDirectory(dir);
+                string filePath = Path.Combine(dir, "wave_history.json");
+
+                List<Track> existing = new();
+                if (File.Exists(filePath))
+                {
+                    try
+                    {
+                        var json = File.ReadAllText(filePath);
+                        var loaded = JsonSerializer.Deserialize<List<Track>>(json, _jsonOptions);
+                        if (loaded != null) existing.AddRange(loaded);
+                    }
+                    catch { }
+                }
+
+                if (!existing.Any(t => Track.IsSameTrackId(t.Id, track.Id)))
+                {
+                    existing.Insert(0, track);
+                    if (existing.Count > 500) existing = existing.Take(500).ToList();
+                    var updatedJson = JsonSerializer.Serialize(existing, _jsonOptions);
+                    File.WriteAllText(filePath, updatedJson);
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[RecordPlayedWaveTrack File Warning] {ex.Message}");
+            }
+        });
+    }
+
+    public async Task<IReadOnlyList<Track>> GetWaveHistoryTracksAsync(CancellationToken cancellationToken = default)
+    {
+        if (_cachedWaveHistoryTracks != null && (DateTime.UtcNow - _lastWaveHistoryCacheTime) < TimeSpan.FromMinutes(10))
+        {
+            var combined = new Dictionary<string, Track>(_recordedWaveTracks, StringComparer.OrdinalIgnoreCase);
+            foreach (var t in _cachedWaveHistoryTracks)
+            {
+                combined.TryAdd(t.Id, t);
+            }
+            foreach (var t in combined.Values)
+            {
+                t.IsLiked = IsTrackLiked(t.Id);
+            }
+            return combined.Values.ToList();
+        }
+
+        await _waveHistoryLock.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_cachedWaveHistoryTracks != null && (DateTime.UtcNow - _lastWaveHistoryCacheTime) < TimeSpan.FromMinutes(10))
+            {
+                var combined = new Dictionary<string, Track>(_recordedWaveTracks, StringComparer.OrdinalIgnoreCase);
+                foreach (var t in _cachedWaveHistoryTracks)
+                {
+                    combined.TryAdd(t.Id, t);
+                }
+                foreach (var t in combined.Values)
+                {
+                    t.IsLiked = IsTrackLiked(t.Id);
+                }
+                return combined.Values.ToList();
+            }
+
+            var tracksMap = new Dictionary<string, Track>(_recordedWaveTracks, StringComparer.OrdinalIgnoreCase);
+
+            try
+            {
+                string appData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string filePath = Path.Combine(appData, "YMusic", "wave_history.json");
+                if (File.Exists(filePath))
+                {
+                    var json = await File.ReadAllTextAsync(filePath, cancellationToken).ConfigureAwait(false);
+                    var loaded = JsonSerializer.Deserialize<List<Track>>(json, _jsonOptions);
+                    if (loaded != null)
+                    {
+                        foreach (var t in loaded)
+                        {
+                            if (t != null && !string.IsNullOrWhiteSpace(t.Id))
+                            {
+                                tracksMap.TryAdd(t.Id, t);
+                            }
+                        }
+                    }
+                }
+            }
+            catch { }
+
+            var missingTrackIds = new List<string>();
+            try
+            {
+                using var response = await SendRequestAsync(HttpMethod.Get, "music-history?fullModelsCount=100", null, cancellationToken).ConfigureAwait(false);
+                if (response != null && response.IsSuccessStatusCode)
+                {
+                    var json = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                    using var doc = JsonDocument.Parse(json);
+                    if (doc.RootElement.TryGetProperty("result", out var resultElem) &&
+                        resultElem.TryGetProperty("historyTabs", out var tabsElem))
+                    {
+                        foreach (var tab in tabsElem.EnumerateArray())
+                        {
+                            if (tab.TryGetProperty("items", out var itemsElem))
+                            {
+                                foreach (var item in itemsElem.EnumerateArray())
+                                {
+                                    bool isWaveContext = false;
+                                    if (item.TryGetProperty("context", out var ctx) &&
+                                        ctx.TryGetProperty("type", out var typeElem))
+                                    {
+                                        string? typeStr = typeElem.GetString();
+                                        if (string.Equals(typeStr, "wave", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            isWaveContext = true;
+                                        }
+                                    }
+
+                                    if (!isWaveContext) continue;
+
+                                    if (item.TryGetProperty("tracks", out var tracksElem))
+                                    {
+                                        foreach (var tr in tracksElem.EnumerateArray())
+                                        {
+                                            if (!tr.TryGetProperty("data", out var dataElem)) continue;
+
+                                            if (dataElem.TryGetProperty("fullModel", out var fmElem))
+                                            {
+                                                try
+                                                {
+                                                    var track = JsonSerializer.Deserialize<Track>(fmElem.GetRawText(), _jsonOptions);
+                                                    if (track != null && !string.IsNullOrWhiteSpace(track.Id))
+                                                    {
+                                                        track.IsLiked = IsTrackLiked(track.Id);
+                                                        tracksMap.TryAdd(track.Id, track);
+                                                    }
+                                                }
+                                                catch { }
+                                            }
+                                            else if (dataElem.TryGetProperty("itemId", out var itemIdElem) &&
+                                                     itemIdElem.TryGetProperty("trackId", out var tidElem))
+                                            {
+                                                string? tid = tidElem.ValueKind == JsonValueKind.Number
+                                                    ? tidElem.GetInt64().ToString()
+                                                    : tidElem.GetString();
+                                                if (!string.IsNullOrWhiteSpace(tid) && !tracksMap.ContainsKey(tid))
+                                                {
+                                                    missingTrackIds.Add(tid);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Debug.WriteLine($"[GetWaveHistoryTracksAsync error] {ex.Message}");
+            }
+
+            if (missingTrackIds.Count > 0)
+            {
+                var resolved = await GetTracksAsync(missingTrackIds.Distinct().Take(300), cancellationToken).ConfigureAwait(false);
+                foreach (var t in resolved)
+                {
+                    if (t != null && !string.IsNullOrWhiteSpace(t.Id))
+                    {
+                        t.IsLiked = IsTrackLiked(t.Id);
+                        tracksMap.TryAdd(t.Id, t);
+                    }
+                }
+            }
+
+            foreach (var t in tracksMap.Values)
+            {
+                t.IsLiked = IsTrackLiked(t.Id);
+            }
+
+            var resultList = tracksMap.Values.ToList();
+            _cachedWaveHistoryTracks = resultList;
+            _lastWaveHistoryCacheTime = DateTime.UtcNow;
+            return resultList;
+        }
+        finally
+        {
+            _waveHistoryLock.Release();
+        }
     }
 
     public async Task<IReadOnlyList<Playlist>> GetPersonalPlaylistsAsync(CancellationToken cancellationToken = default)

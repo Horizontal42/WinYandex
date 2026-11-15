@@ -21,6 +21,7 @@ public sealed partial class ArtistViewModel : BaseViewModel
 
     public ObservableCollection<Track> PopularTracks { get; } = new();
     public ObservableCollection<Track> CollectionTracks { get; } = new();
+    public ObservableCollection<Track> WaveTracks { get; } = new();
     public ObservableCollection<Album> AllAlbums { get; } = new();
     public ObservableCollection<Album> AlsoAlbums { get; } = new();
     public ObservableCollection<Album> DisplayAlbums { get; } = new();
@@ -87,6 +88,16 @@ public sealed partial class ArtistViewModel : BaseViewModel
     public string CollectionTracksCountText => Loc?.CurrentLanguage == "en"
         ? $"{CollectionTracks.Count} {(CollectionTracks.Count == 1 ? "track" : "tracks")}"
         : $"{CollectionTracks.Count} {GetRussianTrackPlural(CollectionTracks.Count)}";
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(WaveTracksCountText))]
+    private bool _hasWaveTracks;
+
+    public string WaveTracksTitle => Loc?.CurrentLanguage == "en" ? "From My Wave" : "Слушали в Моей волне";
+    public string PlayWaveTracksText => Loc?.CurrentLanguage == "en" ? "Play" : "Слушать";
+    public string WaveTracksCountText => Loc?.CurrentLanguage == "en"
+        ? $"{WaveTracks.Count} {(WaveTracks.Count == 1 ? "track" : "tracks")}"
+        : $"{WaveTracks.Count} {GetRussianTrackPlural(WaveTracks.Count)}";
 
     private static string GetRussianTrackPlural(int n)
     {
@@ -179,6 +190,9 @@ public sealed partial class ArtistViewModel : BaseViewModel
         OnPropertyChanged(nameof(CollectionTracksTitle));
         OnPropertyChanged(nameof(PlayCollectionTracksText));
         OnPropertyChanged(nameof(CollectionTracksCountText));
+        OnPropertyChanged(nameof(WaveTracksTitle));
+        OnPropertyChanged(nameof(PlayWaveTracksText));
+        OnPropertyChanged(nameof(WaveTracksCountText));
         OnPropertyChanged(nameof(LikeArtistTooltip));
         OnPropertyChanged(nameof(PopularTracksTitle));
         OnPropertyChanged(nameof(DiscographyTitle));
@@ -211,6 +225,7 @@ public sealed partial class ArtistViewModel : BaseViewModel
 
         _playbackCoordinator.Register(PopularTracks);
         _playbackCoordinator.Register(CollectionTracks);
+        _playbackCoordinator.Register(WaveTracks);
 
         _musicService.ArtistLikeChanged += (s, args) =>
         {
@@ -238,11 +253,19 @@ public sealed partial class ArtistViewModel : BaseViewModel
                         OnPropertyChanged(nameof(CollectionTracksCountText));
                     }
                 }
-                else if (args.IsLiked && pop != null && !CollectionTracks.Any(t => Track.IsSameTrackId(t.Id, pop.Id)))
+                var wave = WaveTracks.FirstOrDefault(t => Track.IsSameTrackId(t.Id, args.TrackId));
+                if (wave != null) wave.IsLiked = args.IsLiked;
+
+                if (args.IsLiked && !CollectionTracks.Any(t => Track.IsSameTrackId(t.Id, args.TrackId)))
                 {
-                    CollectionTracks.Add(pop);
-                    HasCollectionTracks = true;
-                    OnPropertyChanged(nameof(CollectionTracksCountText));
+                    var sourceTrack = pop ?? wave;
+                    if (sourceTrack != null)
+                    {
+                        sourceTrack.IsLiked = true;
+                        CollectionTracks.Add(sourceTrack);
+                        HasCollectionTracks = true;
+                        OnPropertyChanged(nameof(CollectionTracksCountText));
+                    }
                 }
             });
         };
@@ -264,11 +287,13 @@ public sealed partial class ArtistViewModel : BaseViewModel
             HasDescription = !string.IsNullOrWhiteSpace(DescriptionText);
             PopularTracks.Clear();
             CollectionTracks.Clear();
+            WaveTracks.Clear();
             AllAlbums.Clear();
             AlsoAlbums.Clear();
             DisplayAlbums.Clear();
             HasPopularTracks = false;
             HasCollectionTracks = false;
+            HasWaveTracks = false;
             HasAlbums = false;
             HasAlsoAlbums = false;
             HasDisplayAlbums = false;
@@ -291,11 +316,13 @@ public sealed partial class ArtistViewModel : BaseViewModel
             IsLiked = _musicService.IsArtistLiked(artistId);
             PopularTracks.Clear();
             CollectionTracks.Clear();
+            WaveTracks.Clear();
             AllAlbums.Clear();
             AlsoAlbums.Clear();
             DisplayAlbums.Clear();
             HasPopularTracks = false;
             HasCollectionTracks = false;
+            HasWaveTracks = false;
             HasAlbums = false;
             HasAlsoAlbums = false;
             HasDisplayAlbums = false;
@@ -351,12 +378,15 @@ public sealed partial class ArtistViewModel : BaseViewModel
             {
                 PopularTracks.Clear();
                 CollectionTracks.Clear();
+                WaveTracks.Clear();
                 HasCollectionTracks = false;
+                HasWaveTracks = false;
                 AllAlbums.Clear();
                 AlsoAlbums.Clear();
                 DisplayAlbums.Clear();
 
                 OnPropertyChanged(nameof(CollectionTracksCountText));
+                OnPropertyChanged(nameof(WaveTracksCountText));
 
                 if (briefInfo?.Artist != null)
                 {
@@ -478,7 +508,7 @@ public sealed partial class ArtistViewModel : BaseViewModel
                 FilterAlbums(0);
             });
 
-            _ = LoadCollectionTracksAsync(artistId, briefInfo?.Artist?.Name ?? ArtistName);
+            _ = LoadUserArtistTracksAsync(artistId, briefInfo?.Artist?.Name ?? ArtistName);
         }
         catch (Exception ex)
         {
@@ -491,31 +521,57 @@ public sealed partial class ArtistViewModel : BaseViewModel
         }
     }
 
-    private async Task LoadCollectionTracksAsync(long artistId, string artistName)
+    private async Task LoadUserArtistTracksAsync(long artistId, string artistName)
     {
         try
         {
-            var allLiked = await _musicService.GetLikedTracksAsync().ConfigureAwait(false);
+            var likedTask = _musicService.GetLikedTracksAsync();
+            var waveTask = _musicService.GetWaveHistoryTracksAsync();
+            await Task.WhenAll(likedTask, waveTask).ConfigureAwait(false);
+
+            var allLiked = await likedTask.ConfigureAwait(false);
+            var allWave = await waveTask.ConfigureAwait(false);
+
             var artistCollectionTracks = allLiked
                 .Where(t => (t.Artists != null && t.Artists.Any(a => a.Id == artistId)) ||
                             (!string.IsNullOrWhiteSpace(artistName) && t.ArtistNames.Contains(artistName, StringComparison.OrdinalIgnoreCase)))
+                .DistinctBy(t => t.Id)
+                .ToList();
+
+            var artistWaveTracks = allWave
+                .Where(t => (t.Artists != null && t.Artists.Any(a => a.Id == artistId)) ||
+                            (!string.IsNullOrWhiteSpace(artistName) && t.ArtistNames.Contains(artistName, StringComparison.OrdinalIgnoreCase)))
+                .DistinctBy(t => t.Id)
                 .ToList();
 
             RunOnUi(() =>
             {
                 if (ArtistId != artistId) return; // User already navigated to another artist
+
                 CollectionTracks.Clear();
                 foreach (var ct in artistCollectionTracks)
                 {
+                    ct.IsLiked = true;
                     CollectionTracks.Add(ct);
                 }
                 HasCollectionTracks = CollectionTracks.Count > 0;
                 OnPropertyChanged(nameof(CollectionTracksCountText));
+                _playbackCoordinator.Sync(CollectionTracks);
+
+                WaveTracks.Clear();
+                foreach (var wt in artistWaveTracks)
+                {
+                    wt.IsLiked = _musicService.IsTrackLiked(wt.Id);
+                    WaveTracks.Add(wt);
+                }
+                HasWaveTracks = WaveTracks.Count > 0;
+                OnPropertyChanged(nameof(WaveTracksCountText));
+                _playbackCoordinator.Sync(WaveTracks);
             });
         }
         catch (Exception ex)
         {
-            System.Diagnostics.Debug.WriteLine($"[ArtistViewModel] Collection tracks warning: {ex.Message}");
+            System.Diagnostics.Debug.WriteLine($"[ArtistViewModel] User tracks warning: {ex.Message}");
         }
     }
 
@@ -607,6 +663,23 @@ public sealed partial class ArtistViewModel : BaseViewModel
     }
 
     [RelayCommand]
+    public async Task PlayWaveTracksAsync()
+    {
+        if (WaveTracks.Count == 0) return;
+
+        var playable = WaveTracks.Where(t => t.Available).ToList();
+        if (playable.Count == 0)
+        {
+            var isEn = Loc?.CurrentLanguage == "en";
+            App.GetService<PlayerBarViewModel>()?.ShowToast(isEn ? "No playable tracks available yet" : "Пока нет доступных треков для воспроизведения");
+            return;
+        }
+
+        _audioPlayer.CurrentPlaybackMode = PlaybackMode.Custom;
+        await _audioPlayer.PlayQueueAsync(playable, 0).ConfigureAwait(false);
+    }
+
+    [RelayCommand]
     public async Task PlayPopularTracksAsync()
     {
         if (PopularTracks.Count == 0) return;
@@ -650,18 +723,38 @@ public sealed partial class ArtistViewModel : BaseViewModel
             return;
         }
 
-        IList<Track> targetQueue;
+        List<Track> targetQueue;
         int index;
 
-        if (CollectionTracks.Any(t => Track.IsSameTrackId(t.Id, track.Id)))
+        if (CollectionTracks.Contains(track))
         {
             targetQueue = CollectionTracks.ToList();
             index = CollectionTracks.IndexOf(track);
         }
-        else
+        else if (WaveTracks.Contains(track))
+        {
+            targetQueue = WaveTracks.ToList();
+            index = WaveTracks.IndexOf(track);
+        }
+        else if (PopularTracks.Contains(track))
         {
             targetQueue = PopularTracks.ToList();
             index = PopularTracks.IndexOf(track);
+        }
+        else if (CollectionTracks.Any(t => Track.IsSameTrackId(t.Id, track.Id)))
+        {
+            targetQueue = CollectionTracks.ToList();
+            index = targetQueue.FindIndex(t => Track.IsSameTrackId(t.Id, track.Id));
+        }
+        else if (WaveTracks.Any(t => Track.IsSameTrackId(t.Id, track.Id)))
+        {
+            targetQueue = WaveTracks.ToList();
+            index = targetQueue.FindIndex(t => Track.IsSameTrackId(t.Id, track.Id));
+        }
+        else
+        {
+            targetQueue = PopularTracks.ToList();
+            index = targetQueue.FindIndex(t => Track.IsSameTrackId(t.Id, track.Id));
         }
 
         if (index < 0) index = 0;
