@@ -42,14 +42,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
     private EqualizerEffectDefinition? _eq2;
     private EqualizerEffectDefinition? _eq3;
     private LimiterEffectDefinition? _limiter;
-    private AudioFrameOutputNode? _frameOutputNode;
-    private volatile bool _isAnalyzingCurrentTrack;
-    private double _accumulatedSumSquares;
-    private long _accumulatedSampleCount;
-    private float _measuredPeak;
-    private readonly ConcurrentDictionary<string, (double Lufs, double PeakDb)> _measuredLoudnessCache = new();
-    private readonly string _loudnessCacheFilePath;
-    private System.Threading.Timer? _loudnessCacheSaveTimer;
 
     private readonly List<Track> _queue = new();
     private List<int> _playOrder = new();
@@ -357,9 +349,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
         _mediaPlayer.CommandManager.IsEnabled = true;
         _settingsService.SettingChanged += OnSettingsChanged;
 
-        _loudnessCacheFilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YMusic", "loudness_cache.json");
-        LoadLoudnessCache();
-
         _mediaPlayer.CommandManager.PlayReceived += (cmd, args) =>
         {
             var deferral = args.GetDeferral();
@@ -602,16 +591,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
                     catch (Exception ex)
                     {
                         LogDebug($"[Normalization] Limiter init warning: {ex.Message}");
-                    }
-
-                    try
-                    {
-                        _frameOutputNode = _audioGraph.CreateFrameOutputNode();
-                        _audioGraph.QuantumStarted += OnAudioGraphQuantumStarted;
-                    }
-                    catch (Exception ex)
-                    {
-                        LogDebug($"[Normalization] FrameOutputNode init warning: {ex.Message}");
                     }
 
                     _deviceOutput.OutgoingGain = _isMuted ? 0.0 : (_volume / 100.0);
@@ -1154,11 +1133,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
                     {
                         try { _currentInputNode.RemoveOutgoingConnection(_deviceOutput); } catch { }
                     }
-                    if (_frameOutputNode != null)
-                    {
-                        try { _currentInputNode.RemoveOutgoingConnection(_frameOutputNode); } catch { }
-                    }
-                    _isAnalyzingCurrentTrack = false;
                     _currentInputNode.MediaSourceCompleted -= OnInputNodeMediaCompleted;
                     _currentInputNode.Dispose();
                     _currentInputNode = null;
@@ -1455,29 +1429,16 @@ public sealed class AudioPlayerService : IAudioPlayerService
                         {
                             _currentInputNode.Stop();
                             _currentInputNode.RemoveOutgoingConnection(_deviceOutput);
-                            if (_frameOutputNode != null)
-                            {
-                                try { _currentInputNode.RemoveOutgoingConnection(_frameOutputNode); } catch { }
-                            }
                             _currentInputNode.MediaSourceCompleted -= OnInputNodeMediaCompleted;
                             _currentInputNode.Dispose();
                         }
 
                         _currentInputNode = inputResult.Node;
-                        double? measuredLufs = null;
-                        if (_currentTrack != null && _measuredLoudnessCache.TryGetValue(_currentTrack.CleanId, out var cached))
-                        {
-                            measuredLufs = cached.Lufs;
-                        }
                         double normGain = _settingsService.LoudnessNormalizationEnabled
-                            ? (_currentTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs, measuredLufs) ?? 1.0)
+                            ? (_currentTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs) ?? 1.0)
                             : 1.0;
                         _currentInputNode.OutgoingGain = normGain;
                         _currentInputNode.AddOutgoingConnection(_deviceOutput);
-                        if (_frameOutputNode != null)
-                        {
-                            try { _currentInputNode.AddOutgoingConnection(_frameOutputNode); } catch { }
-                        }
                         _currentInputNode.MediaSourceCompleted += OnInputNodeMediaCompleted;
                         _currentInputNode.Seek(currentPos);
                         if (wasPlaying)
@@ -1662,12 +1623,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
         {
             try
             {
-                double? measured = null;
-                if (_currentTrack != null && _measuredLoudnessCache.TryGetValue(_currentTrack.CleanId, out var cached))
-                {
-                    measured = cached.Lufs;
-                }
-                double normGain = _settingsService.LoudnessNormalizationEnabled ? (_currentTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs, measured) ?? 1.0) : 1.0;
+                double normGain = _settingsService.LoudnessNormalizationEnabled ? (_currentTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs) ?? 1.0) : 1.0;
                 _currentInputNode.OutgoingGain = normGain;
             }
             catch { }
@@ -1791,10 +1747,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
             var nextNode = inputResult.Node;
             nextNode.OutgoingGain = 0.0;
             nextNode.AddOutgoingConnection(_deviceOutput);
-            if (_frameOutputNode != null)
-            {
-                try { nextNode.AddOutgoingConnection(_frameOutputNode); } catch { }
-            }
             nextNode.Start();
 
             _crossfadeCts?.Cancel();
@@ -1825,19 +1777,8 @@ public sealed class AudioPlayerService : IAudioPlayerService
             }
             PositionChanged?.Invoke(this, TimeSpan.Zero);
 
-            double? oldMeasured = null;
-            if (oldTrack != null && _measuredLoudnessCache.TryGetValue(oldTrack.CleanId, out var oCached))
-            {
-                oldMeasured = oCached.Lufs;
-            }
-            double? nextMeasured = null;
-            if (nextTrack != null && _measuredLoudnessCache.TryGetValue(nextTrack.CleanId, out var nCached))
-            {
-                nextMeasured = nCached.Lufs;
-            }
-
-            double currentNormGain = _settingsService.LoudnessNormalizationEnabled ? (oldTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs, oldMeasured) ?? 1.0) : 1.0;
-            double nextNormGain = _settingsService.LoudnessNormalizationEnabled ? (nextTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs, nextMeasured) ?? 1.0) : 1.0;
+            double currentNormGain = _settingsService.LoudnessNormalizationEnabled ? (oldTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs) ?? 1.0) : 1.0;
+            double nextNormGain = _settingsService.LoudnessNormalizationEnabled ? (nextTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs) ?? 1.0) : 1.0;
 
             int totalSteps = Math.Max(10, crossfadeSeconds * 20); // 20 updates per second (50ms)
             int stepDelayMs = (crossfadeSeconds * 1000) / totalSteps;
@@ -1881,17 +1822,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
             }
 
             _isCrossfading = false;
-            if (nextTrack != null && (nextTrack.R128 == null || nextTrack.R128.IntegratedLoudnessLufs == 0.0) && !nextMeasured.HasValue)
-            {
-                _accumulatedSumSquares = 0.0;
-                _accumulatedSampleCount = 0;
-                _measuredPeak = 0.0f;
-                _isAnalyzingCurrentTrack = true;
-            }
-            else
-            {
-                _isAnalyzingCurrentTrack = false;
-            }
             TriggerUpcomingTracksPreload();
         }
         catch (OperationCanceledException)
@@ -1998,11 +1928,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
                     {
                         try { _currentInputNode.RemoveOutgoingConnection(_deviceOutput); } catch { }
                     }
-                    if (_frameOutputNode != null)
-                    {
-                        try { _currentInputNode.RemoveOutgoingConnection(_frameOutputNode); } catch { }
-                    }
-                    _isAnalyzingCurrentTrack = false;
                     _currentInputNode.MediaSourceCompleted -= OnInputNodeMediaCompleted;
                     _currentInputNode.Dispose();
                 }
@@ -2097,42 +2022,17 @@ public sealed class AudioPlayerService : IAudioPlayerService
                     {
                         _currentInputNode.Stop();
                         _currentInputNode.RemoveOutgoingConnection(_deviceOutput);
-                        if (_frameOutputNode != null)
-                        {
-                            try { _currentInputNode.RemoveOutgoingConnection(_frameOutputNode); } catch { }
-                        }
                         _currentInputNode.MediaSourceCompleted -= OnInputNodeMediaCompleted;
                         _currentInputNode.Dispose();
                     }
 
                     _currentInputNode = inputResult.Node;
-                    double? measuredLufs = null;
-                    if (_currentTrack != null && _measuredLoudnessCache.TryGetValue(_currentTrack.CleanId, out var cached))
-                    {
-                        measuredLufs = cached.Lufs;
-                    }
                     double normGain = _settingsService.LoudnessNormalizationEnabled
-                        ? (_currentTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs, measuredLufs) ?? 1.0)
+                        ? (_currentTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs) ?? 1.0)
                         : 1.0;
                     _currentInputNode.OutgoingGain = normGain;
                     _currentInputNode.AddOutgoingConnection(_deviceOutput);
-                    if (_frameOutputNode != null)
-                    {
-                        try { _currentInputNode.AddOutgoingConnection(_frameOutputNode); } catch { }
-                    }
                     _currentInputNode.MediaSourceCompleted += OnInputNodeMediaCompleted;
-
-                    if (_currentTrack != null && (_currentTrack.R128 == null || _currentTrack.R128.IntegratedLoudnessLufs == 0.0) && !measuredLufs.HasValue)
-                    {
-                        _accumulatedSumSquares = 0.0;
-                        _accumulatedSampleCount = 0;
-                        _measuredPeak = 0.0f;
-                        _isAnalyzingCurrentTrack = true;
-                    }
-                    else
-                    {
-                        _isAnalyzingCurrentTrack = false;
-                    }
 
                     if (_currentInputNode.Duration > TimeSpan.Zero)
                     {
@@ -2177,12 +2077,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
         if (requestId != _playRequestId) return;
 
-        double? fallbackMeasuredLufs = null;
-        if (_currentTrack != null && _measuredLoudnessCache.TryGetValue(_currentTrack.CleanId, out var fCached))
-        {
-            fallbackMeasuredLufs = fCached.Lufs;
-        }
-        double fallbackNormGain = _settingsService.LoudnessNormalizationEnabled ? (_currentTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs, fallbackMeasuredLufs) ?? 1.0) : 1.0;
+        double fallbackNormGain = _settingsService.LoudnessNormalizationEnabled ? (_currentTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs) ?? 1.0) : 1.0;
         _mediaPlayer.Volume = Math.Clamp((_volume / 100.0) * fallbackNormGain, 0.0, 1.0);
         _mediaPlayer.Source = source;
         if (startPosition.HasValue && startPosition.Value > TimeSpan.Zero)
@@ -2205,16 +2100,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     private void OnInputNodeMediaCompleted(MediaSourceAudioInputNode sender, object args)
     {
-        if (_isAnalyzingCurrentTrack && _accumulatedSampleCount > 10000)
-        {
-            _isAnalyzingCurrentTrack = false;
-            var trackToAnalyze = _currentTrack;
-            double sumSquares = _accumulatedSumSquares;
-            long sampleCount = _accumulatedSampleCount;
-            float measuredPeak = _measuredPeak;
-            _ = Task.Run(() => FinishDynamicAnalysis(trackToAnalyze, sumSquares, sampleCount, measuredPeak));
-        }
-
         if (_isCrossfading)
         {
             return;
@@ -2327,14 +2212,8 @@ public sealed class AudioPlayerService : IAudioPlayerService
     {
         try
         {
-            double? measuredLufs = null;
-            if (_currentTrack != null && _measuredLoudnessCache.TryGetValue(_currentTrack.CleanId, out var cached))
-            {
-                measuredLufs = cached.Lufs;
-            }
-
             double targetGain = _settingsService.LoudnessNormalizationEnabled
-                ? (_currentTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs, measuredLufs) ?? 1.0)
+                ? (_currentTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs) ?? 1.0)
                 : 1.0;
 
             if (_currentInputNode != null && !_isCrossfading)
@@ -2527,8 +2406,6 @@ public sealed class AudioPlayerService : IAudioPlayerService
         _deviceOutput?.Dispose();
         _audioGraph?.Dispose();
 
-        _loudnessCacheSaveTimer?.Dispose();
-        _frameOutputNode?.Dispose();
         _limiter = null;
 
         _settingsService.SettingChanged -= OnSettingsChanged;
@@ -2537,177 +2414,4 @@ public sealed class AudioPlayerService : IAudioPlayerService
         _mediaPlayer.MediaEnded -= OnMediaEnded;
         _mediaPlayer.Dispose();
     }
-
-    private void OnAudioGraphQuantumStarted(AudioGraph sender, object args)
-    {
-        if (!_isPlaying || !_isAnalyzingCurrentTrack || _frameOutputNode == null || _currentTrack == null) return;
-
-        try
-        {
-            using var frame = _frameOutputNode.GetFrame();
-            using var buffer = frame.LockBuffer(AudioBufferAccessMode.Read);
-            using var reference = buffer.CreateReference();
-
-            unsafe
-            {
-                ((IMemoryBufferByteAccess)reference).GetBuffer(out byte* dataInBytes, out uint capacity);
-                if (dataInBytes == null || capacity == 0) return;
-
-                float* dataInFloat = (float*)dataInBytes;
-                int sampleCount = (int)(capacity / sizeof(float));
-                if (sampleCount <= 0) return;
-
-                double sumSq = 0.0;
-                float peak = 0.0f;
-                for (int i = 0; i < sampleCount; i++)
-                {
-                    float s = dataInFloat[i];
-                    sumSq += s * s;
-                    float abs = Math.Abs(s);
-                    if (abs > peak) peak = abs;
-                }
-
-                _accumulatedSumSquares += sumSq;
-                _accumulatedSampleCount += sampleCount;
-                if (peak > _measuredPeak) _measuredPeak = peak;
-
-                // ~2.5 seconds of stereo 44.1/48kHz audio is ~220,000 samples
-                if (_accumulatedSampleCount >= 220000)
-                {
-                    _isAnalyzingCurrentTrack = false;
-                    var trackToAnalyze = _currentTrack;
-                    double sumSquares = _accumulatedSumSquares;
-                    long totalSampleCount = _accumulatedSampleCount;
-                    float measuredPeak = _measuredPeak;
-                    _ = Task.Run(() => FinishDynamicAnalysis(trackToAnalyze, sumSquares, totalSampleCount, measuredPeak));
-                }
-            }
-        }
-        catch { }
-    }
-
-    private void FinishDynamicAnalysis(Track? track, double sumSquares, long sampleCount, float measuredPeak)
-    {
-        try
-        {
-            if (sampleCount == 0 || track == null) return;
-
-            double rms = Math.Sqrt(sumSquares / sampleCount);
-            // Convert RMS to LUFS approximation (ITU-R BS.1770 unweighted approx: 20*log10(rms) - 0.69)
-            double lufs = rms > 0.000001 ? (20.0 * Math.Log10(rms) - 0.691) : -30.0;
-            lufs = Math.Clamp(lufs, -40.0, -2.0);
-
-            double peakDb = measuredPeak > 0.000001 ? (20.0 * Math.Log10(measuredPeak)) : -60.0;
-
-            string cleanId = track.CleanId;
-            if (!string.IsNullOrEmpty(cleanId))
-            {
-                _measuredLoudnessCache[cleanId] = (lufs, peakDb);
-                SaveLoudnessCacheDebounced();
-                LogDebug($"[Normalization] Dynamic measurement finished for {cleanId}: LUFS={lufs:F2}, Peak={peakDb:F2} dBTP");
-            }
-
-            // Only apply gain if the track currently playing is still the one analyzed!
-            if (_settingsService.LoudnessNormalizationEnabled && _currentTrack != null && Track.IsSameTrackId(_currentTrack.Id, track.Id))
-            {
-                if (track.R128 == null || track.R128.IntegratedLoudnessLufs == 0.0)
-                {
-                    double targetGain = track.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs, lufs);
-                    _ = SmoothTransitionGainAsync(targetGain);
-                }
-            }
-        }
-        catch { }
-    }
-
-    private async Task SmoothTransitionGainAsync(double targetGain)
-    {
-        try
-        {
-            var node = _currentInputNode;
-            if (node == null || _isCrossfading) return;
-            double startGain = node.OutgoingGain;
-            if (Math.Abs(startGain - targetGain) < 0.02) return;
-
-            int steps = 10;
-            int delayMs = 25; // 250ms total smooth transition
-            for (int i = 1; i <= steps; i++)
-            {
-                if (_currentInputNode != node || _isCrossfading) break;
-                double t = (double)i / steps;
-                node.OutgoingGain = startGain + (targetGain - startGain) * t;
-                await Task.Delay(delayMs).ConfigureAwait(false);
-            }
-            if (_currentInputNode == node && !_isCrossfading)
-            {
-                node.OutgoingGain = targetGain;
-            }
-            LogDebug($"[Normalization] Transitioned dynamically to {targetGain:F3}");
-        }
-        catch { }
-    }
-
-    private void LoadLoudnessCache()
-    {
-        try
-        {
-            if (File.Exists(_loudnessCacheFilePath))
-            {
-                var json = File.ReadAllText(_loudnessCacheFilePath);
-                var dict = JsonSerializer.Deserialize<Dictionary<string, double[]>>(json);
-                if (dict != null)
-                {
-                    foreach (var kvp in dict)
-                    {
-                        if (kvp.Value != null && kvp.Value.Length >= 2)
-                        {
-                            _measuredLoudnessCache[kvp.Key] = (kvp.Value[0], kvp.Value[1]);
-                        }
-                    }
-                }
-            }
-        }
-        catch { }
-    }
-
-    private void SaveLoudnessCacheDebounced()
-    {
-        lock (_navDebounceLock)
-        {
-            if (_loudnessCacheSaveTimer == null)
-            {
-                _loudnessCacheSaveTimer = new System.Threading.Timer(_ =>
-                {
-                    try
-                    {
-                        var dict = new Dictionary<string, double[]>();
-                        foreach (var kvp in _measuredLoudnessCache)
-                        {
-                            dict[kvp.Key] = new double[] { kvp.Value.Lufs, kvp.Value.PeakDb };
-                        }
-                        var dir = Path.GetDirectoryName(_loudnessCacheFilePath);
-                        if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
-                        {
-                            Directory.CreateDirectory(dir);
-                        }
-                        var json = JsonSerializer.Serialize(dict);
-                        File.WriteAllText(_loudnessCacheFilePath, json);
-                    }
-                    catch { }
-                }, null, 2000, System.Threading.Timeout.Infinite);
-            }
-            else
-            {
-                _loudnessCacheSaveTimer.Change(2000, System.Threading.Timeout.Infinite);
-            }
-        }
-    }
-}
-
-[ComImport]
-[Guid("5B0D3235-4DBA-4D44-865E-8F1D0E4FD04D")]
-[InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-internal unsafe interface IMemoryBufferByteAccess
-{
-    void GetBuffer(out byte* buffer, out uint capacity);
 }
