@@ -20,6 +20,7 @@ public partial class App : Application
     public static IServiceProvider Services { get; private set; } = null!;
 
     public static ILocalizationService Loc => Services.GetRequiredService<ILocalizationService>();
+    public static IDialogService Dialogs => Services.GetRequiredService<IDialogService>();
 
     public static T GetService<T>() where T : class
     {
@@ -106,6 +107,7 @@ public partial class App : Application
         services.AddSingleton<IGameOverlayService, GameOverlayService>();
         services.AddSingleton<ICustomThemeService, CustomThemeService>();
         services.AddSingleton<IThemeService, ThemeService>();
+        services.AddSingleton<IDialogService, DialogService>();
 
         // ViewModels
         services.AddSingleton<PlayerBarViewModel>();

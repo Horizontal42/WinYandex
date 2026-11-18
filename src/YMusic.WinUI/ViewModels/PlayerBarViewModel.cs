@@ -543,6 +543,15 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
         UpdateFckCensorState();
 
         _audioPlayer.CurrentTrackChanged += OnCurrentTrackChanged;
+        if (_audioPlayer.CurrentTrack != null)
+        {
+            OnCurrentTrackChanged(this, _audioPlayer.CurrentTrack);
+            var initPos = _audioPlayer.Position;
+            if (initPos > TimeSpan.Zero)
+            {
+                OnPositionChanged(this, initPos);
+            }
+        }
         _audioPlayer.CurrentQualityChanged += OnCurrentQualityChanged;
         _audioPlayer.IsPlayingChanged += OnIsPlayingChanged;
         _audioPlayer.PositionChanged += OnPositionChanged;
@@ -1823,19 +1832,21 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
 
         try
         {
-            await dialog.ShowAsync();
+            await App.Dialogs.ShowDialogAsync(dialog);
         }
         catch { }
     }
 
-    private CancellationTokenSource? _toastCts;
+    private int _toastGeneration;
+    private readonly object _toastLock = new();
 
     public void ShowToast(string message)
     {
-        _toastCts?.Cancel();
-        _toastCts?.Dispose();
-        _toastCts = new CancellationTokenSource();
-        var token = _toastCts.Token;
+        int gen;
+        lock (_toastLock)
+        {
+            gen = ++_toastGeneration;
+        }
 
         RunOnUi(() =>
         {
@@ -1843,15 +1854,20 @@ public sealed partial class PlayerBarViewModel : BaseViewModel
             IsToastOpen = true;
         });
 
-        _ = Task.Delay(3000, token).ContinueWith(t =>
+        _ = Task.Delay(3000).ContinueWith(_ =>
         {
-            if (t.IsCanceled || token.IsCancellationRequested) return;
+            lock (_toastLock)
+            {
+                if (gen != _toastGeneration) return;
+            }
+
             RunOnUi(() =>
             {
-                if (!token.IsCancellationRequested)
+                lock (_toastLock)
                 {
-                    IsToastOpen = false;
+                    if (gen != _toastGeneration) return;
                 }
+                IsToastOpen = false;
             });
         }, TaskScheduler.Default);
     }

@@ -6,6 +6,8 @@ using System.Globalization;
 using System.Reflection;
 using System.Xml.Linq;
 using Windows.Globalization;
+using CommunityToolkit.Mvvm.Messaging;
+using YMusic.WinUI.Models;
 using YMusic.WinUI.Services.Interfaces;
 
 namespace YMusic.WinUI.Services.Implementations;
@@ -141,6 +143,11 @@ public sealed class LocalizationService : ILocalizationService
     private void NotifyLanguageChanged()
     {
         LanguageChanged?.Invoke(this, _currentLanguage);
+        try
+        {
+            WeakReferenceMessenger.Default.Send(new LanguageChangedMessage(_currentLanguage));
+        }
+        catch { }
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(string.Empty));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs("Item[]"));
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(CurrentLanguage)));

@@ -1,7 +1,9 @@
 #nullable enable
 
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Messaging;
 using Microsoft.UI.Dispatching;
+using YMusic.WinUI.Models;
 using YMusic.WinUI.Services.Interfaces;
 
 namespace YMusic.WinUI.ViewModels;
@@ -16,21 +18,16 @@ public abstract partial class BaseViewModel : ObservableObject
     {
         try
         {
-            if (App.Services != null)
+            WeakReferenceMessenger.Default.Register<BaseViewModel, LanguageChangedMessage>(this, static (recipient, message) =>
             {
-                App.Loc.LanguageChanged += OnLocalizationLanguageChanged;
-            }
+                recipient.RunOnUi(() =>
+                {
+                    recipient.OnPropertyChanged(nameof(Loc));
+                    recipient.OnLanguageChanged();
+                });
+            });
         }
         catch { }
-    }
-
-    private void OnLocalizationLanguageChanged(object? sender, string lang)
-    {
-        RunOnUi(() =>
-        {
-            OnPropertyChanged(nameof(Loc));
-            OnLanguageChanged();
-        });
     }
 
     protected virtual void OnLanguageChanged()

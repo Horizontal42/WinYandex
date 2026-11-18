@@ -1,6 +1,7 @@
 #nullable enable
 
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.IO;
@@ -256,7 +257,8 @@ public sealed class FlacStreamProxy : IFlacStreamProxy
             using var upstreamResp = await _httpClient.SendAsync(upstreamReq, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
 
             response.StatusCode = (int)upstreamResp.StatusCode;
-            response.ContentType = "audio/mp4";
+            string upstreamMedia = upstreamResp.Content.Headers.ContentType?.MediaType ?? string.Empty;
+            response.ContentType = upstreamMedia.Contains("flac", StringComparison.OrdinalIgnoreCase) ? "audio/flac" : "audio/mp4";
             response.Headers["Accept-Ranges"] = "bytes";
 
             if (upstreamResp.Content.Headers.ContentRange != null)
@@ -281,19 +283,27 @@ public sealed class FlacStreamProxy : IFlacStreamProxy
             // Single decryptor instance per stream request
             using var decryptor = new AesCtrDecryptor(keyCopy);
 
-            byte[] buffer = new byte[65536];
-            byte[] decrypted = new byte[65536];
+            byte[] buffer = ArrayPool<byte>.Shared.Rent(65536);
+            byte[] decrypted = ArrayPool<byte>.Shared.Rent(65536);
             long currentOffset = startOffset;
 
-            int read;
-            while ((read = await upstreamStream.ReadAsync(buffer, 0, buffer.Length, ct).ConfigureAwait(false)) > 0)
+            try
             {
-                decryptor.DecryptBlock(currentOffset, buffer, 0, read, decrypted, 0);
-                await clientStream.WriteAsync(decrypted, 0, read, ct).ConfigureAwait(false);
-                currentOffset += read;
-            }
+                int read;
+                while ((read = await upstreamStream.ReadAsync(buffer, 0, 65536, ct).ConfigureAwait(false)) > 0)
+                {
+                    decryptor.DecryptBlock(currentOffset, buffer, 0, read, decrypted, 0);
+                    await clientStream.WriteAsync(decrypted, 0, read, ct).ConfigureAwait(false);
+                    currentOffset += read;
+                }
 
-            await clientStream.FlushAsync(ct).ConfigureAwait(false);
+                await clientStream.FlushAsync(ct).ConfigureAwait(false);
+            }
+            finally
+            {
+                ArrayPool<byte>.Shared.Return(buffer);
+                ArrayPool<byte>.Shared.Return(decrypted);
+            }
         }
         catch (Exception ex) when (ex is HttpListenerException or IOException or OperationCanceledException)
         {

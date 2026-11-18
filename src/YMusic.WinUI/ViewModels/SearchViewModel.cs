@@ -400,6 +400,9 @@ public sealed partial class SearchViewModel : BaseViewModel
                         {
                             TopTracks.Add(track);
                         }
+
+                        _trackCoordinator.Sync(Tracks);
+                        _trackCoordinator.Sync(TopTracks);
                     }
 
                     if (result?.Artists?.Results != null)
@@ -569,6 +572,7 @@ public sealed partial class SearchViewModel : BaseViewModel
                     {
                         Tracks.Add(track);
                     }
+                    _trackCoordinator.Sync(Tracks);
                     _tracksCurrentPage = nextPage;
                     _hasMoreTracks = Tracks.Count < TracksTotal;
                 });

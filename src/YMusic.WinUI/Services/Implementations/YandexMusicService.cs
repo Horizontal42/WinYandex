@@ -2079,7 +2079,8 @@ public sealed partial class YandexMusicService : IYandexMusicService
 
             if (string.IsNullOrWhiteSpace(streamUrl)) return (null, null);
 
-            if (string.Equals(codec, "flac-mp4", StringComparison.OrdinalIgnoreCase) &&
+            if ((string.Equals(codec, "flac-mp4", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(codec, "flac", StringComparison.OrdinalIgnoreCase)) &&
                 string.Equals(transport, "encraw", StringComparison.OrdinalIgnoreCase) &&
                 !string.IsNullOrWhiteSpace(keyHex))
             {

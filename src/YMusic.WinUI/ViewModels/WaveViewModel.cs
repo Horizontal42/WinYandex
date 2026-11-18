@@ -940,6 +940,12 @@ public sealed partial class WaveViewModel : BaseViewModel
             }
         });
 
+        if (_audioPlayer.CurrentPlaybackMode == PlaybackMode.Wave && !_isWaveActive)
+        {
+            _isWaveActive = true;
+            RunOnUi(() => IsWaveActiveState = true);
+        }
+
         if (!_isWaveActive || track == null)
         {
             return;

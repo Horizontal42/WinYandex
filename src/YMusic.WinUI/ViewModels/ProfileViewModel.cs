@@ -1850,7 +1850,7 @@ public sealed partial class ProfileViewModel : BaseViewModel
                     DefaultButton = ContentDialogButton.Primary
                 };
 
-                var result = await dialog.ShowAsync();
+                var result = await App.Dialogs.ShowDialogAsync(dialog);
                 if (result == ContentDialogResult.None)
                 {
                     return;
@@ -1906,7 +1906,7 @@ public sealed partial class ProfileViewModel : BaseViewModel
                     DefaultButton = ContentDialogButton.Primary
                 };
 
-                var result = await dialog.ShowAsync();
+                var result = await App.Dialogs.ShowDialogAsync(dialog);
                 if (result == ContentDialogResult.None)
                 {
                     return;

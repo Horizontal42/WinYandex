@@ -571,7 +571,7 @@ public static class TrackMenuHelper
 
             try
             {
-                await dialog.ShowAsync();
+                await App.Dialogs.ShowDialogAsync(dialog);
             }
             catch { }
         };

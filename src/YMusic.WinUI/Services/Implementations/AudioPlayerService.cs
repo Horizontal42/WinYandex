@@ -527,6 +527,14 @@ public sealed class AudioPlayerService : IAudioPlayerService
                 UpdateSmtcMetadata(_currentTrack);
                 _smtc.PlaybackStatus = MediaPlaybackStatus.Paused;
                 UpdateSmtcTimeline(_restoredPosition, _currentTrack.Duration);
+
+                ExecuteOnDispatcher(() =>
+                {
+                    CurrentTrackChanged?.Invoke(this, _currentTrack);
+                    QueueChanged?.Invoke(this, EventArgs.Empty);
+                    PositionChanged?.Invoke(this, _restoredPosition);
+                    DurationChanged?.Invoke(this, _currentTrack.Duration);
+                });
             }
         }
         catch (Exception ex)
@@ -1634,7 +1642,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
         // Check if nextTrack is in cache or resolve and enqueue
         string? cachedPath = null;
         StreamAudioQuality? cachedQuality = null;
-        bool isNextCached = _audioCacheService != null && _audioCacheService.TryGetCachedTrack(nextTrack.Id, out cachedPath, out cachedQuality);
+        bool isNextCached = _audioCacheService != null && _audioCacheService.TryGetCachedTrack(nextTrack.Id, out cachedPath, out cachedQuality, preferredQuality: _settingsService.PreferredQuality);
         if (isNextCached && !string.IsNullOrEmpty(cachedPath))
         {
             _preloadedTrack = (nextTrack.Id, cachedPath, cachedQuality);
@@ -1810,7 +1818,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
                 streamUrl = _preloadedTrack.Value.StreamUrl;
                 quality = _preloadedTrack.Value.Quality;
             }
-            else if (_audioCacheService != null && _audioCacheService.TryGetCachedTrack(nextTrack.Id, out var cachedPath, out var cachedQuality))
+            else if (_audioCacheService != null && _audioCacheService.TryGetCachedTrack(nextTrack.Id, out var cachedPath, out var cachedQuality, preferredQuality: _settingsService.PreferredQuality))
             {
                 streamUrl = cachedPath;
                 quality = cachedQuality;
@@ -2017,8 +2025,14 @@ public sealed class AudioPlayerService : IAudioPlayerService
         var streamInfo = await _yandexMusicService.GetTrackStreamInfoAsync(trackId).ConfigureAwait(false);
         if (!string.IsNullOrEmpty(streamInfo.Url))
         {
-            // Non-blocking background caching to disk with upgrade support
-            _audioCacheService?.EnqueueDownload(trackId, streamInfo.Url, streamInfo.Quality);
+            // Do not enqueue duplicate background download when streaming via local FLAC proxy
+            bool isLocalProxy = streamInfo.Url.StartsWith("http://127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+                                streamInfo.Url.StartsWith("http://localhost", StringComparison.OrdinalIgnoreCase);
+
+            if (!isLocalProxy)
+            {
+                _audioCacheService?.EnqueueDownload(trackId, streamInfo.Url, streamInfo.Quality);
+            }
             return streamInfo;
         }
 
@@ -2064,7 +2078,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
         StreamAudioQuality? quality = null;
 
         // Prefer local disk cache if available (0 ms latency)
-        if (_audioCacheService != null && _audioCacheService.TryGetCachedTrack(track.Id, out var cachedPath, out var cachedQuality))
+        if (_audioCacheService != null && _audioCacheService.TryGetCachedTrack(track.Id, out var cachedPath, out var cachedQuality, preferredQuality: _settingsService.PreferredQuality))
         {
             streamUrl = cachedPath;
             quality = cachedQuality;
