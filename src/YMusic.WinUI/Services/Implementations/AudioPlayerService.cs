@@ -63,6 +63,8 @@ public sealed class AudioPlayerService : IAudioPlayerService
     private readonly object _saveLock = new();
     private readonly object _saveTimerLock = new();
     private readonly object _queueLock = new();
+    private readonly SemaphoreSlim _advanceLock = new(1, 1);
+    private volatile int _trackGeneration;
     private System.Threading.Timer? _debouncedSaveTimer;
     private int _consecutivePlaybackFailures = 0;
     private TimeSpan _lastObservedPos = TimeSpan.Zero;
@@ -404,6 +406,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
         _smtc.IsPreviousEnabled = true;
 
         _positionTimer = new System.Timers.Timer(250);
+        _positionTimer.AutoReset = false;
         _positionTimer.Elapsed += (_, _) =>
         {
             try
@@ -427,29 +430,15 @@ public sealed class AudioPlayerService : IAudioPlayerService
                     }
 
                     // Auto-advance watchdog: if track reached its end, or position is stalled near end of audio stream
+                    int gen = _trackGeneration;
                     if (dur > TimeSpan.FromSeconds(3) && !_isCrossfading)
                     {
-                        if (pos >= dur - TimeSpan.FromMilliseconds(350))
+                        if (pos >= dur - TimeSpan.FromMilliseconds(500))
                         {
                             LogDebug($"[Watchdog] Track reached end (pos={pos.TotalSeconds:F2}s, dur={dur.TotalSeconds:F2}s). Advancing track.");
                             _stalledAtEndTicks = 0;
-                            if (_repeatMode == RepeatMode.One)
+                            if (gen == _trackGeneration)
                             {
-                                Seek(TimeSpan.Zero);
-                                Play();
-                            }
-                            else
-                            {
-                                _ = NextAsync();
-                            }
-                        }
-                        else if (pos >= dur - TimeSpan.FromSeconds(3.5) && pos > TimeSpan.Zero && pos == _lastObservedPos)
-                        {
-                            _stalledAtEndTicks++;
-                            if (_stalledAtEndTicks >= 4) // 4 ticks * 250ms = 1.0s without movement near end
-                            {
-                                LogDebug($"[Watchdog] Audio stream ended early (pos={pos.TotalSeconds:F2}s, dur={dur.TotalSeconds:F2}s). Advancing track.");
-                                _stalledAtEndTicks = 0;
                                 if (_repeatMode == RepeatMode.One)
                                 {
                                     Seek(TimeSpan.Zero);
@@ -458,6 +447,27 @@ public sealed class AudioPlayerService : IAudioPlayerService
                                 else
                                 {
                                     _ = NextAsync();
+                                }
+                            }
+                        }
+                        else if (pos >= dur - TimeSpan.FromSeconds(5.0) && pos > TimeSpan.Zero && pos == _lastObservedPos)
+                        {
+                            _stalledAtEndTicks++;
+                            if (_stalledAtEndTicks >= 3) // 3 ticks without movement near end
+                            {
+                                LogDebug($"[Watchdog] Audio stream ended early (pos={pos.TotalSeconds:F2}s, dur={dur.TotalSeconds:F2}s). Advancing track.");
+                                _stalledAtEndTicks = 0;
+                                if (gen == _trackGeneration)
+                                {
+                                    if (_repeatMode == RepeatMode.One)
+                                    {
+                                        Seek(TimeSpan.Zero);
+                                        Play();
+                                    }
+                                    else
+                                    {
+                                        _ = NextAsync();
+                                    }
                                 }
                             }
                         }
@@ -482,6 +492,10 @@ public sealed class AudioPlayerService : IAudioPlayerService
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[AudioPlayer] Timer error: {ex.Message}");
+            }
+            finally
+            {
+                if (_isPlaying && !_isDisposed) try { _positionTimer.Start(); } catch { }
             }
         };
 
@@ -1235,6 +1249,9 @@ public sealed class AudioPlayerService : IAudioPlayerService
     {
         LogDebug("NextAsync entered");
         if (!CheckNavDebounce()) return;
+        if (!await _advanceLock.WaitAsync(0)) { LogDebug("NextAsync blocked by _advanceLock"); return; }
+        try
+        {
         LogDebug("NextAsync passed debounce -> advancing track");
 
         CancelActiveCrossfade();
@@ -1290,6 +1307,11 @@ public sealed class AudioPlayerService : IAudioPlayerService
         if (trackToPlay != null)
         {
             await LoadAndPlayTrackAsync(trackToPlay).ConfigureAwait(false);
+        }
+        }
+        finally
+        {
+            _advanceLock.Release();
         }
     }
 
@@ -1367,6 +1389,9 @@ public sealed class AudioPlayerService : IAudioPlayerService
     {
         LogDebug($"PreviousAsync entered. Position={Position.TotalSeconds:F2}s");
         if (!CheckNavDebounce()) return;
+        if (!await _advanceLock.WaitAsync(0)) { LogDebug("PreviousAsync blocked by _advanceLock"); return; }
+        try
+        {
         LogDebug("PreviousAsync passed debounce");
 
         CancelActiveCrossfade();
@@ -1410,6 +1435,11 @@ public sealed class AudioPlayerService : IAudioPlayerService
         if (trackToPlay != null)
         {
             await LoadAndPlayTrackAsync(trackToPlay).ConfigureAwait(false);
+        }
+        }
+        finally
+        {
+            _advanceLock.Release();
         }
     }
 
@@ -1708,6 +1738,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
     {
         if (_isCrossfading) return;
         _isCrossfading = true;
+        int crossfadeGen = _trackGeneration;
         LogDebug($"[Crossfade] Initiating {crossfadeSeconds}s crossfade");
 
         try
@@ -1770,6 +1801,12 @@ public sealed class AudioPlayerService : IAudioPlayerService
                 (streamUrl, quality) = await ResolveTrackStreamAsync(nextTrack.Id).ConfigureAwait(false);
             }
 
+            if (!_isCrossfading || crossfadeGen != _trackGeneration)
+            {
+                _isCrossfading = false;
+                return;
+            }
+
             if (string.IsNullOrWhiteSpace(streamUrl) || _audioGraph == null || _deviceOutput == null)
             {
                 _isCrossfading = false;
@@ -1785,10 +1822,21 @@ public sealed class AudioPlayerService : IAudioPlayerService
             else
             {
                 var storageFile = await Windows.Storage.StorageFile.GetFileFromPathAsync(streamUrl);
+                if (!_isCrossfading || crossfadeGen != _trackGeneration)
+                {
+                    _isCrossfading = false;
+                    return;
+                }
                 nextSource = Windows.Media.Core.MediaSource.CreateFromStorageFile(storageFile);
             }
 
             var inputResult = await _audioGraph.CreateMediaSourceAudioInputNodeAsync(nextSource);
+            if (!_isCrossfading || crossfadeGen != _trackGeneration)
+            {
+                try { inputResult.Node?.Dispose(); } catch { }
+                _isCrossfading = false;
+                return;
+            }
             if (inputResult.Status != Windows.Media.Audio.MediaSourceAudioInputNodeCreationStatus.Success || inputResult.Node == null)
             {
                 _isCrossfading = false;
@@ -1798,6 +1846,8 @@ public sealed class AudioPlayerService : IAudioPlayerService
             var nextNode = inputResult.Node;
             nextNode.OutgoingGain = 0.0;
             nextNode.AddOutgoingConnection(_deviceOutput);
+            // Attach handler immediately so EOF is never missed even if crossfade fails later
+            nextNode.MediaSourceCompleted += OnInputNodeMediaCompleted;
             nextNode.Start();
 
             _crossfadeCts?.Cancel();
@@ -1814,7 +1864,10 @@ public sealed class AudioPlayerService : IAudioPlayerService
             _currentInputNode = nextNode;
 
             var oldTrack = _currentTrack;
-            _orderIndex = nextOrderIndex;
+            lock (_queueLock)
+            {
+                _orderIndex = nextOrderIndex;
+            }
             _currentTrack = nextTrack;
             _currentQuality = quality;
             CurrentTrackChanged?.Invoke(this, nextTrack);
@@ -1873,7 +1926,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
             if (_currentInputNode != null)
             {
                 _currentInputNode.OutgoingGain = nextNormGain;
-                _currentInputNode.MediaSourceCompleted += OnInputNodeMediaCompleted;
+                // Handler already attached at node creation; no duplicate needed
             }
 
             _isCrossfading = false;
@@ -1883,10 +1936,38 @@ public sealed class AudioPlayerService : IAudioPlayerService
         catch (OperationCanceledException)
         {
             // Expected when user pauses or skips
+            LogDebug("[Crossfade] Cancelled (user skip or pause)");
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"[Crossfade Error] {ex.Message}");
+            LogDebug($"[Crossfade] Failed: {ex.Message}. Ensuring current node handler is attached.");
+            // Ensure current input node still has completion handler so playback doesn't stall
+            try
+            {
+                if (_currentInputNode != null)
+                {
+                    // Re-subscribe idempotently: remove first to avoid double-attach, then add
+                    _currentInputNode.MediaSourceCompleted -= OnInputNodeMediaCompleted;
+                    _currentInputNode.MediaSourceCompleted += OnInputNodeMediaCompleted;
+                }
+            }
+            catch { }
+            // If old node has already reached EOF, trigger immediate fallback advance
+            try
+            {
+                if (_currentInputNode != null)
+                {
+                    var pos = _currentInputNode.Position;
+                    var dur = _currentInputNode.Duration;
+                    if (dur > TimeSpan.Zero && pos >= dur - TimeSpan.FromMilliseconds(500))
+                    {
+                        LogDebug("[Crossfade] Old node at EOF after failure, triggering auto-advance");
+                        _ = NextAsync();
+                    }
+                }
+            }
+            catch { }
         }
         finally
         {
@@ -1933,6 +2014,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
     {
         LogDebug($"LoadAndPlayTrackAsync: '{track.FullTitle}' (Id={track.Id})");
         CancelActiveCrossfade();
+        Interlocked.Increment(ref _trackGeneration);
         _lastObservedPos = TimeSpan.Zero;
         _stalledAtEndTicks = 0;
         int requestId = Interlocked.Increment(ref _playRequestId);
@@ -2164,11 +2246,15 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     private void OnInputNodeMediaCompleted(MediaSourceAudioInputNode sender, object args)
     {
-        LogDebug($"[AudioPlayer] OnInputNodeMediaCompleted fired for '{_currentTrack?.FullTitle}' (isCrossfading={_isCrossfading})");
-        if (_isCrossfading)
+        LogDebug($"[AudioPlayer] OnInputNodeMediaCompleted fired for '{_currentTrack?.FullTitle}' (isCrossfading={_isCrossfading}, sender==fadingOut={sender == _fadingOutNode})");
+
+        // Ignore completion events from the node that is fading out during crossfade
+        if (sender == _fadingOutNode)
         {
             return;
         }
+
+        int gen = _trackGeneration;
 
         if (_repeatMode == RepeatMode.One)
         {
@@ -2177,7 +2263,10 @@ public sealed class AudioPlayerService : IAudioPlayerService
             return;
         }
 
-        _ = NextAsync();
+        if (gen == _trackGeneration)
+        {
+            _ = NextAsync();
+        }
     }
 
     private void UpdateSmtcMetadata(Track track)
@@ -2312,7 +2401,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
     private long _lastNavTicks;
     private readonly object _navDebounceLock = new();
-    private bool CheckNavDebounce(int thresholdMs = 120)
+    private bool CheckNavDebounce(int thresholdMs = 400)
     {
         lock (_navDebounceLock)
         {
