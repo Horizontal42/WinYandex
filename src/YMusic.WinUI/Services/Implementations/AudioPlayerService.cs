@@ -69,6 +69,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
     private int _consecutivePlaybackFailures = 0;
     private TimeSpan _lastObservedPos = TimeSpan.Zero;
     private int _stalledAtEndTicks = 0;
+    private DateTime _lastTimelineUpdateTime = DateTime.MinValue;
 
     public Track? CurrentTrack => _currentTrack;
     public StreamAudioQuality? CurrentQuality => _currentQuality;
@@ -350,41 +351,14 @@ public sealed class AudioPlayerService : IAudioPlayerService
         {
             AudioCategory = MediaPlayerAudioCategory.Media
         };
-        _mediaPlayer.CommandManager.IsEnabled = true;
+        // Disable MediaPlayer automatic command routing so SMTC ButtonPressed events are delivered manually
+        _mediaPlayer.CommandManager.IsEnabled = false;
         _settingsService.SettingChanged += OnSettingsChanged;
 
-        _mediaPlayer.CommandManager.PlayReceived += (cmd, args) =>
-        {
-            var deferral = args.GetDeferral();
-            args.Handled = true;
-            LogDebug("CommandManager.PlayReceived");
-            TogglePlayPause();
-            deferral.Complete();
-        };
-        _mediaPlayer.CommandManager.PauseReceived += (cmd, args) =>
-        {
-            var deferral = args.GetDeferral();
-            args.Handled = true;
-            LogDebug("CommandManager.PauseReceived");
-            TogglePlayPause();
-            deferral.Complete();
-        };
-        _mediaPlayer.CommandManager.NextReceived += (cmd, args) =>
-        {
-            var deferral = args.GetDeferral();
-            args.Handled = true;
-            LogDebug("CommandManager.NextReceived");
-            _ = NextAsync();
-            deferral.Complete();
-        };
-        _mediaPlayer.CommandManager.PreviousReceived += (cmd, args) =>
-        {
-            var deferral = args.GetDeferral();
-            args.Handled = true;
-            LogDebug("CommandManager.PreviousReceived");
-            _ = PreviousAsync();
-            deferral.Complete();
-        };
+        _mediaPlayer.CommandManager.PlayReceived += OnCommandManagerPlayReceived;
+        _mediaPlayer.CommandManager.PauseReceived += OnCommandManagerPauseReceived;
+        _mediaPlayer.CommandManager.NextReceived += OnCommandManagerNextReceived;
+        _mediaPlayer.CommandManager.PreviousReceived += OnCommandManagerPreviousReceived;
 
         _mediaPlayer.CommandManager.PlayBehavior.EnablingRule = MediaCommandEnablingRule.Always;
         _mediaPlayer.CommandManager.PauseBehavior.EnablingRule = MediaCommandEnablingRule.Always;
@@ -400,10 +374,14 @@ public sealed class AudioPlayerService : IAudioPlayerService
         };
 
         _smtc = _mediaPlayer.SystemMediaTransportControls;
+        _smtc.IsEnabled = true;
         _smtc.IsPlayEnabled = true;
         _smtc.IsPauseEnabled = true;
         _smtc.IsNextEnabled = true;
         _smtc.IsPreviousEnabled = true;
+        _smtc.IsStopEnabled = true;
+        _smtc.ButtonPressed += OnSmtcButtonPressed;
+        _smtc.PlaybackPositionChangeRequested += OnSmtcPlaybackPositionChangeRequested;
 
         _positionTimer = new System.Timers.Timer(250);
         _positionTimer.AutoReset = false;
@@ -482,6 +460,12 @@ public sealed class AudioPlayerService : IAudioPlayerService
                     }
                     _lastObservedPos = pos;
 
+                    if ((DateTime.UtcNow - _lastTimelineUpdateTime).TotalSeconds >= 1.5)
+                    {
+                        _lastTimelineUpdateTime = DateTime.UtcNow;
+                        UpdateSmtcTimeline(pos, dur);
+                    }
+
                     if ((DateTime.UtcNow - _lastPeriodicSaveTime).TotalSeconds >= 3.0)
                     {
                         _lastPeriodicSaveTime = DateTime.UtcNow;
@@ -541,6 +525,8 @@ public sealed class AudioPlayerService : IAudioPlayerService
                 _currentTrack = saved.CurrentTrack;
                 _restoredPosition = TimeSpan.FromSeconds(Math.Max(0, saved.PositionSeconds));
                 UpdateSmtcMetadata(_currentTrack);
+                _smtc.PlaybackStatus = MediaPlaybackStatus.Paused;
+                UpdateSmtcTimeline(_restoredPosition, _currentTrack.Duration);
             }
         }
         catch (Exception ex)
@@ -1133,6 +1119,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
             _audioGraph.Start();
             _isPlaying = true;
             _smtc.PlaybackStatus = MediaPlaybackStatus.Playing;
+            UpdateSmtcTimeline(Position, Duration);
             IsPlayingChanged?.Invoke(this, true);
             _positionTimer.Start();
             return;
@@ -1144,7 +1131,27 @@ public sealed class AudioPlayerService : IAudioPlayerService
             return;
         }
 
+        if (_currentTrack == null && _queue.Count > 0)
+        {
+            lock (_queueLock)
+            {
+                int trackIdx = (_orderIndex >= 0 && _orderIndex < _playOrder.Count)
+                    ? _playOrder[_orderIndex]
+                    : 0;
+                if (trackIdx >= 0 && trackIdx < _queue.Count)
+                {
+                    _ = LoadAndPlayTrackAsync(_queue[trackIdx]);
+                    return;
+                }
+            }
+        }
+
         _mediaPlayer.Play();
+        _isPlaying = true;
+        _smtc.PlaybackStatus = MediaPlaybackStatus.Playing;
+        UpdateSmtcTimeline(Position, Duration);
+        IsPlayingChanged?.Invoke(this, true);
+        _positionTimer.Start();
     }
 
     public void Pause()
@@ -1155,6 +1162,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
             _fadingOutNode?.Stop();
             _isPlaying = false;
             _smtc.PlaybackStatus = MediaPlaybackStatus.Paused;
+            UpdateSmtcTimeline(Position, Duration);
             IsPlayingChanged?.Invoke(this, false);
             _positionTimer.Stop();
             RequestSaveState();
@@ -1162,6 +1170,11 @@ public sealed class AudioPlayerService : IAudioPlayerService
         }
 
         _mediaPlayer.Pause();
+        _isPlaying = false;
+        _smtc.PlaybackStatus = MediaPlaybackStatus.Paused;
+        UpdateSmtcTimeline(Position, Duration);
+        IsPlayingChanged?.Invoke(this, false);
+        _positionTimer.Stop();
         RequestSaveState();
     }
 
@@ -1452,6 +1465,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
         double maxSec = duration.TotalSeconds > 0 ? duration.TotalSeconds : double.MaxValue;
         var clamped = TimeSpan.FromSeconds(Math.Clamp(position.TotalSeconds, 0, maxSec));
         _restoredPosition = clamped;
+        UpdateSmtcTimeline(clamped, duration);
 
         if (_currentInputNode != null)
         {
@@ -1542,6 +1556,11 @@ public sealed class AudioPlayerService : IAudioPlayerService
             if (wasPlaying)
             {
                 _mediaPlayer.Play();
+                _isPlaying = true;
+                _smtc.PlaybackStatus = MediaPlaybackStatus.Playing;
+                UpdateSmtcTimeline(currentPos, Duration);
+                IsPlayingChanged?.Invoke(this, true);
+                _positionTimer.Start();
             }
         }
     }
@@ -1873,6 +1892,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
             CurrentTrackChanged?.Invoke(this, nextTrack);
             CurrentQualityChanged?.Invoke(this, quality);
             UpdateSmtcMetadata(nextTrack);
+            _smtc.PlaybackStatus = MediaPlaybackStatus.Playing;
             RequestSaveState();
 
             TimeSpan effectiveNextDur = nextNode.Duration > TimeSpan.Zero
@@ -1884,6 +1904,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
                 DurationChanged?.Invoke(this, effectiveNextDur);
             }
             PositionChanged?.Invoke(this, TimeSpan.Zero);
+            UpdateSmtcTimeline(TimeSpan.Zero, effectiveNextDur);
 
             double currentNormGain = _settingsService.LoudnessNormalizationEnabled ? (oldTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs) ?? 1.0) : 1.0;
             double nextNormGain = _settingsService.LoudnessNormalizationEnabled ? (nextTrack?.CalculateNormalizationGain(_settingsService.LoudnessTargetLufs) ?? 1.0) : 1.0;
@@ -2103,6 +2124,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
                 {
                     _consecutivePlaybackFailures = 0;
                     _isPlaying = false;
+                    _smtc.PlaybackStatus = MediaPlaybackStatus.Stopped;
                     IsPlayingChanged?.Invoke(this, false);
                     try
                     {
@@ -2203,6 +2225,7 @@ public sealed class AudioPlayerService : IAudioPlayerService
                     _audioGraph.Start();
                     _isPlaying = true;
                     _smtc.PlaybackStatus = MediaPlaybackStatus.Playing;
+                    UpdateSmtcTimeline(startPosition ?? TimeSpan.Zero, nodeDur);
                     IsPlayingChanged?.Invoke(this, true);
                     _positionTimer.Start();
                     if (startPosition.HasValue && startPosition.Value > TimeSpan.Zero)
@@ -2235,6 +2258,11 @@ public sealed class AudioPlayerService : IAudioPlayerService
             catch { }
         }
         _mediaPlayer.Play();
+        _isPlaying = true;
+        _smtc.PlaybackStatus = MediaPlaybackStatus.Playing;
+        UpdateSmtcTimeline(startPosition ?? TimeSpan.Zero, _currentTrack?.Duration ?? TimeSpan.Zero);
+        IsPlayingChanged?.Invoke(this, true);
+        _positionTimer.Start();
         if (startPosition.HasValue && startPosition.Value > TimeSpan.Zero)
         {
             PositionChanged?.Invoke(this, startPosition.Value);
@@ -2269,18 +2297,20 @@ public sealed class AudioPlayerService : IAudioPlayerService
         }
     }
 
-    private void UpdateSmtcMetadata(Track track)
+    private void UpdateSmtcMetadata(Track? track)
     {
+        if (track == null) return;
+
         try
         {
             _smtc.DisplayUpdater.Type = MediaPlaybackType.Music;
             _smtc.DisplayUpdater.AppMediaId = "WinYandex";
-            _smtc.DisplayUpdater.MusicProperties.Title = track.FullTitle;
-            _smtc.DisplayUpdater.MusicProperties.Artist = track.ArtistNames;
-            _smtc.DisplayUpdater.MusicProperties.AlbumTitle = track.AlbumTitle;
+            _smtc.DisplayUpdater.MusicProperties.Title = track.FullTitle ?? string.Empty;
+            _smtc.DisplayUpdater.MusicProperties.Artist = track.ArtistNames ?? string.Empty;
+            _smtc.DisplayUpdater.MusicProperties.AlbumTitle = track.AlbumTitle ?? string.Empty;
 
             var coverUrl = track.GetCoverUrl(400);
-            if (!string.IsNullOrWhiteSpace(coverUrl))
+            if (!string.IsNullOrWhiteSpace(coverUrl) && (coverUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || coverUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
             {
                 _smtc.DisplayUpdater.Thumbnail = RandomAccessStreamReference.CreateFromUri(new Uri(coverUrl));
             }
@@ -2291,9 +2321,258 @@ public sealed class AudioPlayerService : IAudioPlayerService
 
             _smtc.DisplayUpdater.Update();
         }
-        catch
+        catch (Exception ex)
         {
-            // Defensive: SMTC display update can fail if OS component is busy
+            LogDebug($"[SMTC] UpdateSmtcMetadata warning: {ex.Message}");
+        }
+    }
+
+    private void UpdateSmtcTimeline(TimeSpan position, TimeSpan duration)
+    {
+        try
+        {
+            if (duration <= TimeSpan.Zero)
+            {
+                return;
+            }
+
+            var timeline = new SystemMediaTransportControlsTimelineProperties
+            {
+                StartTime = TimeSpan.Zero,
+                MinSeekTime = TimeSpan.Zero,
+                Position = position < TimeSpan.Zero ? TimeSpan.Zero : (position > duration ? duration : position),
+                MaxSeekTime = duration,
+                EndTime = duration
+            };
+
+            _smtc.UpdateTimelineProperties(timeline);
+        }
+        catch (Exception ex)
+        {
+            LogDebug($"[SMTC] UpdateTimelineProperties warning: {ex.Message}");
+        }
+    }
+
+    private void OnSmtcButtonPressed(SystemMediaTransportControls sender, SystemMediaTransportControlsButtonPressedEventArgs args)
+    {
+        var button = args.Button;
+        LogDebug($"[SMTC] ButtonPressed: {button}");
+        ExecuteOnDispatcher(() => HandleTransportButton(button));
+    }
+
+    private void OnSmtcPlaybackPositionChangeRequested(SystemMediaTransportControls sender, PlaybackPositionChangeRequestedEventArgs args)
+    {
+        var requestedPos = args.RequestedPlaybackPosition;
+        LogDebug($"[SMTC] PlaybackPositionChangeRequested: {requestedPos.TotalSeconds:F2}s");
+        ExecuteOnDispatcher(() => Seek(requestedPos));
+    }
+
+    private void HandleTransportButton(SystemMediaTransportControlsButton button)
+    {
+        try
+        {
+            switch (button)
+            {
+                case SystemMediaTransportControlsButton.Play:
+                    LogDebug("[SMTC] Handling Play button");
+                    if (!CheckPlayPauseDebounce()) return;
+                    Play();
+                    break;
+                case SystemMediaTransportControlsButton.Pause:
+                    LogDebug("[SMTC] Handling Pause button");
+                    if (!CheckPlayPauseDebounce()) return;
+                    Pause();
+                    break;
+                case SystemMediaTransportControlsButton.Stop:
+                    LogDebug("[SMTC] Handling Stop button");
+                    if (!CheckPlayPauseDebounce()) return;
+                    Pause();
+                    break;
+                case SystemMediaTransportControlsButton.Next:
+                    LogDebug("[SMTC] Handling Next button");
+                    _ = NextAsync();
+                    break;
+                case SystemMediaTransportControlsButton.Previous:
+                    LogDebug("[SMTC] Handling Previous button");
+                    _ = PreviousAsync();
+                    break;
+                default:
+                    LogDebug($"[SMTC] Unhandled button: {button}");
+                    break;
+            }
+        }
+        catch (Exception ex)
+        {
+            LogDebug($"[SMTC] Error handling button {button}: {ex.Message}");
+        }
+    }
+
+    private void OnCommandManagerPlayReceived(MediaPlaybackCommandManager sender, MediaPlaybackCommandManagerPlayReceivedEventArgs args)
+    {
+        var deferral = args.GetDeferral();
+        args.Handled = true;
+        LogDebug("[CommandManager] PlayReceived");
+        ExecuteOnDispatcherWithDeferral(() =>
+        {
+            if (CheckPlayPauseDebounce())
+            {
+                Play();
+            }
+        }, deferral);
+    }
+
+    private void OnCommandManagerPauseReceived(MediaPlaybackCommandManager sender, MediaPlaybackCommandManagerPauseReceivedEventArgs args)
+    {
+        var deferral = args.GetDeferral();
+        args.Handled = true;
+        LogDebug("[CommandManager] PauseReceived");
+        ExecuteOnDispatcherWithDeferral(() =>
+        {
+            if (CheckPlayPauseDebounce())
+            {
+                Pause();
+            }
+        }, deferral);
+    }
+
+    private void OnCommandManagerNextReceived(MediaPlaybackCommandManager sender, MediaPlaybackCommandManagerNextReceivedEventArgs args)
+    {
+        var deferral = args.GetDeferral();
+        args.Handled = true;
+        LogDebug("[CommandManager] NextReceived");
+        ExecuteOnDispatcherWithDeferralAsync(async () =>
+        {
+            await NextAsync().ConfigureAwait(false);
+        }, deferral);
+    }
+
+    private void OnCommandManagerPreviousReceived(MediaPlaybackCommandManager sender, MediaPlaybackCommandManagerPreviousReceivedEventArgs args)
+    {
+        var deferral = args.GetDeferral();
+        args.Handled = true;
+        LogDebug("[CommandManager] PreviousReceived");
+        ExecuteOnDispatcherWithDeferralAsync(async () =>
+        {
+            await PreviousAsync().ConfigureAwait(false);
+        }, deferral);
+    }
+
+    private void ExecuteOnDispatcher(Action action)
+    {
+        var dispatcher = App.MainDispatcherQueue;
+        if (dispatcher != null && !dispatcher.HasThreadAccess)
+        {
+            dispatcher.TryEnqueue(() =>
+            {
+                try
+                {
+                    action();
+                }
+                catch (Exception ex)
+                {
+                    LogDebug($"[AudioPlayerService] Dispatcher action error: {ex.Message}");
+                }
+            });
+        }
+        else
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"[AudioPlayerService] Direct action error: {ex.Message}");
+            }
+        }
+    }
+
+    private void ExecuteOnDispatcherWithDeferral(Action action, Deferral deferral)
+    {
+        var dispatcher = App.MainDispatcherQueue;
+        if (dispatcher != null && !dispatcher.HasThreadAccess)
+        {
+            bool enqueued = dispatcher.TryEnqueue(() =>
+            {
+                try
+                {
+                    action();
+                }
+                catch (Exception ex)
+                {
+                    LogDebug($"[AudioPlayerService] Dispatcher action error: {ex.Message}");
+                }
+                finally
+                {
+                    try { deferral.Complete(); } catch { }
+                }
+            });
+
+            if (!enqueued)
+            {
+                try { deferral.Complete(); } catch { }
+            }
+        }
+        else
+        {
+            try
+            {
+                action();
+            }
+            catch (Exception ex)
+            {
+                LogDebug($"[AudioPlayerService] Direct action error: {ex.Message}");
+            }
+            finally
+            {
+                try { deferral.Complete(); } catch { }
+            }
+        }
+    }
+
+    private void ExecuteOnDispatcherWithDeferralAsync(Func<Task> asyncAction, Deferral deferral)
+    {
+        var dispatcher = App.MainDispatcherQueue;
+        if (dispatcher != null && !dispatcher.HasThreadAccess)
+        {
+            bool enqueued = dispatcher.TryEnqueue(async () =>
+            {
+                try
+                {
+                    await asyncAction().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    LogDebug($"[AudioPlayerService] Dispatcher async action error: {ex.Message}");
+                }
+                finally
+                {
+                    try { deferral.Complete(); } catch { }
+                }
+            });
+
+            if (!enqueued)
+            {
+                try { deferral.Complete(); } catch { }
+            }
+        }
+        else
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    await asyncAction().ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    LogDebug($"[AudioPlayerService] Task.Run async action error: {ex.Message}");
+                }
+                finally
+                {
+                    try { deferral.Complete(); } catch { }
+                }
+            });
         }
     }
 
@@ -2561,6 +2840,14 @@ public sealed class AudioPlayerService : IAudioPlayerService
         _audioGraph?.Dispose();
 
         _limiter = null;
+
+        _smtc.ButtonPressed -= OnSmtcButtonPressed;
+        _smtc.PlaybackPositionChangeRequested -= OnSmtcPlaybackPositionChangeRequested;
+
+        _mediaPlayer.CommandManager.PlayReceived -= OnCommandManagerPlayReceived;
+        _mediaPlayer.CommandManager.PauseReceived -= OnCommandManagerPauseReceived;
+        _mediaPlayer.CommandManager.NextReceived -= OnCommandManagerNextReceived;
+        _mediaPlayer.CommandManager.PreviousReceived -= OnCommandManagerPreviousReceived;
 
         _settingsService.SettingChanged -= OnSettingsChanged;
         _mediaPlayer.PlaybackSession.PlaybackStateChanged -= OnPlaybackStateChanged;
